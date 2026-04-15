@@ -24,6 +24,43 @@ export function log(message: string, source = "express") {
   console.log(`${formattedTime} [${source}] ${message}`);
 }
 
+// CORS — allow Vercel frontend + local dev
+const ALLOWED_ORIGINS = [
+  'https://sortleads.io',
+  'https://www.sortleads.io',
+  'https://sortleads-production.up.railway.app',
+  /\.vercel\.app$/,   // preview deployments
+];
+
+function isAllowedOrigin(origin: string | undefined): string | false {
+  if (!origin) return false;
+  for (const allowed of ALLOWED_ORIGINS) {
+    if (typeof allowed === 'string' && allowed === origin) return origin;
+    if (allowed instanceof RegExp && allowed.test(origin)) return origin;
+  }
+  return false;
+}
+
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  const matched = isAllowedOrigin(origin);
+  if (matched) {
+    res.setHeader('Access-Control-Allow-Origin', matched);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, stripe-signature');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
+  }
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
+// Also allow localhost in development
+if (process.env.NODE_ENV !== 'production') {
+  ALLOWED_ORIGINS.push('http://localhost:5173', 'http://localhost:5000');
+}
+
 (async () => {
   // Register Stripe webhook route BEFORE express.json()
   app.post(
