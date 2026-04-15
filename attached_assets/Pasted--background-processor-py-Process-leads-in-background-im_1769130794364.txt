@@ -1,0 +1,197 @@
+# background_processor.py - Process leads in background
+
+import anthropic
+import pandas as pd
+import json
+from datetime import datetime
+import os
+
+client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+
+def process_leads_batch(csv_path, session_id, criteria):
+    """
+    Process all leads in background without live updates
+    
+    Args:
+        csv_path (str): Path to uploaded CSV
+        session_id (str): Unique session identifier
+        criteria (dict): User's target criteria
+    
+    Returns:
+        str: Path to results Excel file
+    """
+    
+    # Read CSV
+    df = pd.read_csv(csv_path)
+    total_leads = len(df)
+    
+    # Update status file (simple JSON)
+    status = {
+        'status': 'processing',
+        'total': total_leads,
+        'processed': 0,
+        'started_at': datetime.now().isoformat()
+    }
+    status_path = f'/tmp/status_{session_id}.json'
+    with open(status_path, 'w') as f:
+        json.dump(status, f)
+    
+    results = []
+    
+    # Process in batches of 10 (parallel API calls)
+    batch_size = 10
+    for i in range(0, total_leads, batch_size):
+        batch = df.iloc[i:i+batch_size]
+        
+        # Process batch (10 leads at once)
+        batch_results = process_batch_parallel(batch, criteria)
+        results.extend(batch_results)
+        
+        # Update progress every batch (not every lead)
+        processed = min(i + batch_size, total_leads)
+        status['processed'] = processed
+        with open(status_path, 'w') as f:
+            json.dump(status, f)
+    
+    # Create results DataFrame
+    results_df = pd.DataFrame(results)
+    
+    # Generate Excel with 4 sheets
+    results_path = f'/tmp/results_{session_id}.xlsx'
+    with pd.ExcelWriter(results_path, engine='openpyxl') as writer:
+        # Tier 1: Call Today (80-100)
+        tier1 = results_df[results_df['tier'] == 1].sort_values('score', ascending=False)
+        tier1.to_excel(writer, sheet_name='🔴 Call Today', index=False)
+        
+        # Tier 2: This Week (60-79)
+        tier2 = results_df[results_df['tier'] == 2].sort_values('score', ascending=False)
+        tier2.to_excel(writer, sheet_name='🟡 This Week', index=False)
+        
+        # Tier 3: This Month (40-59)
+        tier3 = results_df[results_df['tier'] == 3].sort_values('score', ascending=False)
+        tier3.to_excel(writer, sheet_name='🟢 This Month', index=False)
+        
+        # Tier 4: Skip (0-39)
+        tier4 = results_df[results_df['tier'] == 4].sort_values('score', ascending=False)
+        tier4.to_excel(writer, sheet_name='⚪ Skip', index=False)
+    
+    # Mark as complete
+    status['status'] = 'complete'
+    status['completed_at'] = datetime.now().isoformat()
+    with open(status_path, 'w') as f:
+        json.dump(status, f)
+    
+    return results_path
+
+
+def process_batch_parallel(batch_df, criteria):
+    """
+    Process a batch of leads (10 at once) with Claude
+    
+    Args:
+        batch_df (DataFrame): Batch of leads to process
+        criteria (dict): User criteria
+    
+    Returns:
+        list: Scored lead dictionaries
+    """
+    
+    results = []
+    
+    for idx, row in batch_df.iterrows():
+        # Extract lead data
+        company = row.get('Company', row.get('company', ''))
+        contact = row.get('Contact', row.get('contact', row.get('Name', '')))
+        title = row.get('Title', row.get('title', row.get('Job Title', '')))
+        email = row.get('Email', row.get('email', ''))
+        location = row.get('Location', row.get('City', '') + ', ' + row.get('State', ''))
+        notes = row.get('Notes', row.get('notes', ''))
+        
+        # Score with Claude
+        try:
+            scored = score_lead_claude(
+                company, contact, title, email, location, notes, criteria
+            )
+            
+            # Merge original data with score
+            result = row.to_dict()
+            result.update(scored)
+            results.append(result)
+            
+        except Exception as e:
+            # If Claude fails, mark as unscored
+            result = row.to_dict()
+            result.update({
+                'score': 0,
+                'tier': 4,
+                'reasoning': f'Error scoring: {str(e)}',
+                'confidence': 'low',
+                'next_steps': 'Manual review needed'
+            })
+            results.append(result)
+    
+    return results
+
+
+def score_lead_claude(company, contact, title, email, location, notes, criteria):
+    """
+    Score a single lead with Claude
+    
+    Returns:
+        dict: {score, tier, reasoning, confidence, next_steps}
+    """
+    
+    prompt = f"""Score this B2B lead from 0-100 based on fit criteria.
+
+LEAD DATA:
+Company: {company}
+Contact: {contact}
+Title: {title}
+Email: {email}
+Location: {location}
+Notes: {notes}
+
+TARGET CRITERIA:
+Industry: {criteria.get('industry', 'Not specified')}
+Region: {criteria.get('region', 'Not specified')}
+Company Size: {criteria.get('company_size', 'Not specified')}
+
+SCORING RULES:
+- 80-100 (Tier 1): Excellent fit. Strong buying authority, right industry, in-region, high intent.
+- 60-79 (Tier 2): Good fit. Most criteria met, some gaps.
+- 40-59 (Tier 3): Possible fit. Mixed signals, needs qualification.
+- 0-39 (Tier 4): Poor fit. Wrong industry, out of region, or no buying authority.
+
+CONSIDER:
+- Job title authority (VP/Director/Manager > Analyst/Coordinator)
+- Engagement signals ("requested quote" > "stopped by booth")
+- Geographic fit (exact match > adjacent > far away)
+- Industry alignment (core ICP > adjacent > unrelated)
+
+Return ONLY valid JSON:
+{{
+  "score": <0-100>,
+  "tier": <1-4>,
+  "reasoning": "<2-3 sentences explaining score>",
+  "confidence": "<high|medium|low>",
+  "next_steps": "<specific action>"
+}}"""
+
+    message = client.messages.create(
+        model="claude-sonnet-4-20250514",
+        max_tokens=500,
+        temperature=0.3,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    
+    # Parse JSON response
+    response_text = message.content[0].text
+    
+    # Handle potential markdown code blocks
+    if '```json' in response_text:
+        response_text = response_text.split('```json')[1].split('```')[0].strip()
+    elif '```' in response_text:
+        response_text = response_text.split('```')[1].split('```')[0].strip()
+    
+    result = json.loads(response_text)
+    return result

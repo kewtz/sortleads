@@ -1,0 +1,140 @@
+# pricing.py - Pricing logic for SortLeads
+
+def calculate_price(num_leads):
+    """
+    Calculate price based on tiered volume pricing
+    
+    Args:
+        num_leads (int): Number of leads in uploaded file
+    
+    Returns:
+        dict: {
+            'num_leads': int,
+            'price_per_lead': float,
+            'subtotal': float,
+            'tier': str,
+            'discount_percent': int
+        }
+    """
+    
+    if num_leads <= 0:
+        return {
+            'num_leads': 0,
+            'price_per_lead': 0.00,
+            'subtotal': 0.00,
+            'tier': 'Invalid',
+            'discount_percent': 0
+        }
+    
+    # Pricing tiers (price per lead in USD)
+    if num_leads <= 500:
+        price_per_lead = 0.12
+        tier = "1-500 leads"
+        discount = 0
+    elif num_leads <= 2000:
+        price_per_lead = 0.10
+        tier = "501-2,000 leads"
+        discount = 17
+    elif num_leads <= 5000:
+        price_per_lead = 0.08
+        tier = "2,001-5,000 leads"
+        discount = 33
+    elif num_leads <= 10000:
+        price_per_lead = 0.06
+        tier = "5,001-10,000 leads"
+        discount = 50
+    else:
+        price_per_lead = 0.05
+        tier = "10,000+ leads"
+        discount = 58
+    
+    subtotal = round(num_leads * price_per_lead, 2)
+    
+    return {
+        'num_leads': num_leads,
+        'price_per_lead': price_per_lead,
+        'subtotal': subtotal,
+        'tier': tier,
+        'discount_percent': discount
+    }
+
+
+def format_pricing_display(pricing_info):
+    """
+    Format pricing for display to user
+    
+    Args:
+        pricing_info (dict): Output from calculate_price()
+    
+    Returns:
+        str: Formatted HTML string for display
+    """
+    
+    discount_badge = ""
+    if pricing_info['discount_percent'] > 0:
+        discount_badge = f"<span class='bg-green-100 text-green-800 text-sm px-2 py-1 rounded'>Save {pricing_info['discount_percent']}%</span>"
+    
+    return f"""
+    <div class="bg-white p-6 rounded-lg shadow-lg">
+        <h2 class="text-2xl font-bold mb-4">Your Price</h2>
+        <div class="space-y-2 mb-4">
+            <div class="flex justify-between">
+                <span class="text-gray-600">Number of leads:</span>
+                <span class="font-semibold">{pricing_info['num_leads']:,}</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-600">Price tier:</span>
+                <span class="font-semibold">{pricing_info['tier']}</span>
+            </div>
+            <div class="flex justify-between">
+                <span class="text-gray-600">Price per lead:</span>
+                <span class="font-semibold">${pricing_info['price_per_lead']:.2f}</span>
+            </div>
+        </div>
+        {f'<div class="mb-4">{discount_badge}</div>' if discount_badge else ''}
+        <div class="border-t pt-4">
+            <div class="flex justify-between items-center">
+                <span class="text-xl font-bold">Total:</span>
+                <span class="text-3xl font-bold text-blue-600">${pricing_info['subtotal']:.2f}</span>
+            </div>
+            <p class="text-sm text-gray-500 mt-2">One-time payment. No subscription.</p>
+        </div>
+    </div>
+    """
+
+
+# Stripe configuration
+STRIPE_PRICING = {
+    'currency': 'usd',
+    'product_name': 'SortLeads - Lead Qualification'
+}
+
+
+def get_stripe_amount(subtotal):
+    """
+    Convert dollar amount to Stripe cents
+    
+    Args:
+        subtotal (float): Dollar amount
+    
+    Returns:
+        int: Amount in cents for Stripe
+    """
+    return int(subtotal * 100)
+
+
+# Example usage:
+if __name__ == "__main__":
+    # Test cases
+    test_cases = [100, 500, 501, 1000, 2500, 5500, 8000, 15000]
+    
+    print("SortLeads Pricing Calculator\n")
+    print("-" * 70)
+    
+    for leads in test_cases:
+        pricing = calculate_price(leads)
+        print(f"{leads:>6} leads | ${pricing['price_per_lead']:.2f}/lead | "
+              f"Total: ${pricing['subtotal']:>8.2f} | "
+              f"Tier: {pricing['tier']}")
+    
+    print("-" * 70)

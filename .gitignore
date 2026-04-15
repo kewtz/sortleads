@@ -1,0 +1,12 @@
+node_modules
+dist
+.DS_Store
+.env
+.env.*
+server/public
+vite.config.ts.*
+*.tar.gz
+.replit
+.upm
+.claude
+.local

@@ -1,0 +1,71 @@
+# Privacy Policy - SortLeads
+
+Last updated: [Today's Date]
+
+## What We Collect
+
+### Files You Upload
+- We temporarily store your lead spreadsheet to process it
+- Files are deleted after 30 days automatically
+- We do not use your data to train AI models
+- We do not sell or share your data with third parties
+
+### Payment Information
+- Credit card data is processed by Stripe (stripe.com)
+- We never see or store your credit card numbers
+- Stripe is PCI-DSS Level 1 certified
+
+### What We Don't Collect
+- ❌ No user accounts or passwords
+- ❌ No email addresses (unless you provide them in your spreadsheet)
+- ❌ No tracking cookies or analytics
+- ❌ No phone numbers or personal identification
+
+## How We Use Your Data
+
+1. **To process your leads:** We send company names and contact info to 
+   Claude AI (Anthropic) to score leads
+2. **To generate results:** We create a spreadsheet with scored leads
+3. **For accounting:** We keep payment records (required by law)
+
+That's it. We don't use your data for anything else.
+
+## Data Security
+
+- All files encrypted at rest (AES-256)
+- All connections use HTTPS/TLS 1.3
+- Files auto-delete after 30 days
+- No backups of your lead data
+- Replit provides SOC 2 Type II infrastructure
+
+## Third-Party Services
+
+We use these services to operate:
+
+- **Anthropic (Claude AI):** Processes lead data to generate scores. 
+  [Anthropic Privacy Policy](https://www.anthropic.com/legal/privacy)
+- **Stripe:** Processes payments. 
+  [Stripe Privacy Policy](https://stripe.com/privacy)
+- **Replit:** Hosts our application. 
+  [Replit Privacy Policy](https://replit.com/site/privacy)
+
+## Your Rights
+
+### Delete Your Data
+Your files are automatically deleted after 30 days. If you want immediate 
+deletion, email hello@sortleads.io with your session ID.
+
+### Access Your Data
+You downloaded your results. That's all we have. No account data exists.
+
+### Questions
+Email: hello@sortleads.io
+
+## Changes to This Policy
+We'll update this page if our privacy practices change. Check back 
+occasionally.
+
+---
+
+**Simple version:** We process your leads, give you results, delete 
+everything after 30 days. We don't sell data or create accounts.

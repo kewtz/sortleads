@@ -1,0 +1,285 @@
+Executive summary (plain English)
+
+SortLeads.io is structurally high-risk by design because it:
+
+accepts arbitrary CSV/XLS/XLSX uploads containing PII
+
+processes them through AI
+
+returns modified spreadsheets to end users
+
+markets itself to non-technical sales users (high likelihood of unsafe spreadsheet behavior)
+
+From the UI alone, there are multiple missing or unproven controls that would block it from enterprise approval and make it susceptible to spreadsheet-based abuse, data leakage, and compliance exposure.
+
+Nothing here says “they are malicious” — this is about immaturity + unsafe defaults.
+
+1. Spreadsheet ingestion risks (very high confidence)
+1.1 CSV / Formula Injection (almost certainly unmitigated)
+
+Why this is likely vulnerable
+
+They accept CSV, XLS, XLSX
+
+They do not mention sanitization
+
+They re-export a spreadsheet
+
+Sales leads routinely contain free-text fields (notes, company names, titles)
+
+If any uploaded cell begins with:
+
+=  +  -  @
+
+
+then on export, Excel or Google Sheets will evaluate it as a formula unless explicitly neutralized.
+
+Why this matters
+
+In Excel: formulas can reference other cells, hidden sheets, or external data
+
+In Google Sheets: formulas can trigger network requests, leaking metadata when the file is opened
+
+This is a known OWASP-class issue (CSV Injection)
+
+Missing / unstated control
+
+No mention of:
+
+prefixing with '
+
+encoding formula-leading characters
+
+warning users not to enable formulas/macros
+
+📌 Risk classification: High
+📌 Likelihood: Very high
+📌 Impact: Data leakage, trust erosion, compliance failure
+
+1.2 Macro-enabled file acceptance (XLS vs XLSX)
+
+UI text says:
+
+“CSV, XLS, XLSX up to 10MB”
+
+🚨 This is a red flag.
+
+Why
+
+.xls is a legacy binary format
+
+.xlsm (macro-enabled) is not mentioned as blocked
+
+Renaming .xlsm → .xlsx defeats naïve extension checks
+
+If the backend:
+
+only checks file extension
+
+or only checks MIME type loosely
+
+then macro delivery becomes possible.
+
+What a mature system would say
+
+“CSV or XLSX (non-macro only). Macro-enabled files are rejected.”
+
+That language is not present.
+
+📌 Risk classification: High
+📌 Likelihood: Medium–High
+📌 Impact: Malware distribution vector, reputational damage
+
+1.3 ZIP / decompression bomb risk (XLSX internals)
+
+XLSX = ZIP archive.
+
+They advertise:
+
+“Up to 10MB”
+
+That protects upload size — not expanded size.
+
+If they:
+
+unzip files server-side
+
+do not cap expansion ratio
+
+do not stream parse
+
+they are vulnerable to ZIP bombs.
+
+Nothing in UI suggests:
+
+async queue processing
+
+worker isolation
+
+size expansion limits
+
+📌 Risk classification: Medium
+📌 Likelihood: Medium
+📌 Impact: DoS, instability, noisy-neighbor risk
+
+2. AI + data handling claims (compliance risk)
+2.1 “Never used for AI training – Anthropic Commercial API guarantee”
+
+This statement is legally risky as written.
+
+Why:
+
+They are asserting a downstream vendor guarantee
+
+Without exposing:
+
+DPA
+
+subprocessors
+
+retention policy enforcement mechanism
+
+Also:
+
+“Auto-deleted in 7 days” is asserted
+
+No evidence of:
+
+user-triggered deletion
+
+audit logs
+
+deletion verification
+
+📌 Compliance issue: Claims exceed verifiable controls
+📌 Enterprise risk: High (legal + trust)
+
+2.2 No visible data classification or sensitivity warning
+
+This app explicitly encourages uploading PII:
+
+names
+
+emails
+
+company roles
+
+But provides:
+
+no warning about regulated data
+
+no prohibition against PHI / financial data
+
+no classification labels
+
+That’s a compliance smell, especially if users upload purchased lists of uncertain consent.
+
+3. Web application security gaps (observable from UI)
+3.1 No visible tenant or account boundary indicators
+
+From the screenshots:
+
+No workspace selector
+
+No organization context
+
+No data ownership indicator
+
+This raises IDOR (Insecure Direct Object Reference) concerns:
+
+“Download your sorted list” links
+
+Background job IDs
+
+File access endpoints
+
+Without strong per-tenant authorization checks, this class of app is commonly vulnerable.
+
+📌 Likelihood: Unknown
+📌 Risk: Medium–High (depending on backend maturity)
+
+3.2 No visible rate limiting or abuse controls
+
+They advertise:
+
+“100+ leads processed per minute”
+
+But show:
+
+no throttling messaging
+
+no abuse protection indicators
+
+no export monitoring warnings
+
+This is relevant because data exfiltration often happens through “legitimate” exports.
+
+4. Excel / Google Sheets specific abuse scenarios (high-level, non-operational)
+
+Not instructions — just what defenders model against.
+
+Scenario A: Formula-based exfiltration on open
+
+Attacker plants formula-like values in lead list
+
+User uploads list
+
+App re-exports list
+
+Victim opens file → spreadsheet evaluates formula
+
+Scenario B: Macro propagation through “helpful” enrichment
+
+User uploads XLS with hidden macro sheet
+
+App preserves structure
+
+Another user downloads and opens
+
+Macro executes if enabled
+
+Scenario C: Trust laundering
+
+SortLeads becomes a trust amplifier:
+
+“This came from SortLeads — it should be safe”
+
+That increases the likelihood users:
+
+enable macros
+
+ignore warnings
+
+bypass corporate controls
+
+This is exactly how spreadsheet-borne incidents propagate.
+
+5. What is missing from the UI that mature tools show
+
+You would expect to see at least some of the following:
+
+File handling
+
+“Macro-enabled files are blocked”
+
+“Formulas are neutralized on export”
+
+“Files are scanned for malware”
+
+Security & compliance
+
+SOC 2 / ISO statement (even “in progress”)
+
+Subprocessor list
+
+Data residency statement
+
+DPA download link
+
+User safety
+
+Warning banner on export:
+
+“Do not enable macros or external content.”
+
+None of these are present.
