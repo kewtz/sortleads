@@ -220,7 +220,7 @@ Analyze this lead and respond with a JSON object only.`;
     }
     return parsed;
   }, {
-    retries: 3,
+    retries: 5,
     minTimeout: 12000,
     maxTimeout: 30000,
     factor: 1.5,
