@@ -335,7 +335,7 @@ export default function UploadPage() {
     }
   };
 
-  const promptPlaceholder = `Example: I'm looking for manufacturing companies in the Midwest with 50-500 employees. Decision makers like Plant Managers, Operations Directors, or VP of Manufacturing are ideal. We sell industrial automation equipment, so companies that still use manual processes are our best fit.`;
+  const promptPlaceholder = `Example: PE-backed manufacturing companies doing $50M–$200M in revenue. Target titles: VP of Sales, VP Commercial, COO, President. Industries: industrial equipment, specialty fabrication, components. Buying signals: no CRM, Excel-based forecasting, post-acquisition sales team.`;
 
   const isEmailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
 
@@ -593,6 +593,10 @@ export default function UploadPage() {
                   className="min-h-[150px] resize-none"
                   data-testid="textarea-prompt"
                 />
+                <p className="text-sm text-muted-foreground" data-testid="text-prompt-helper">
+                  The more specific your description, the better the scoring. Include: industry,
+                  company size, relevant job titles, and any buying signals you're looking for.
+                </p>
                 <div className="flex items-center justify-between gap-2">
                   <p className="text-xs text-muted-foreground">{prompt.length} characters</p>
                   {isEnhancing && (
