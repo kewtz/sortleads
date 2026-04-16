@@ -58,8 +58,8 @@ export default function AboutPage() {
                 their CRM, and prioritize who their reps actually call.
               </p>
               <p>
-                At Trex Company — a PE-backed composite decking manufacturer — that
-                work surfaced{" "}
+                At a publicly-traded composite decking manufacturer, that work
+                surfaced{" "}
                 <span className="font-semibold text-primary">
                   $30 to $55 million in revenue leakage
                 </span>{" "}
