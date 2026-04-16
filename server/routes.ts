@@ -4,6 +4,8 @@ import multer from "multer";
 import * as XLSX from "xlsx";
 import { randomUUID } from "crypto";
 import Anthropic from "@anthropic-ai/sdk";
+import pLimit from "p-limit";
+import pRetry, { AbortError } from "p-retry";
 import { storage } from "./storage";
 import type { Lead, ProcessedLead, Job } from "@shared/schema";
 import { calculatePrice, MAX_FREE_COUPON_LEADS, FREE_TIER_LEAD_LIMIT } from "@shared/schema";
@@ -16,7 +18,13 @@ const upload = multer({
 
 const anthropic = new Anthropic({
   apiKey: process.env.ANTHROPIC_API_KEY,
+  // Disable SDK built-in retries — we handle retries explicitly with p-retry
+  maxRetries: 0,
 });
+
+// Global concurrency cap for Anthropic calls. 3 is conservative for a 5 RPM org limit;
+// p-retry handles the 429/529 backoff when we exceed the burst allowance.
+const anthropicLimit = pLimit(3);
 
 // Helper to extract JSON from Claude response (handles extra text around JSON)
 function extractJSON(text: string): object | null {
@@ -185,52 +193,48 @@ ${JSON.stringify(lead.originalData, null, 2)}
 
 Analyze this lead and respond with a JSON object only.`;
 
-  try {
-    const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 500,
-      system: systemPrompt,
-      messages: [
-        { role: "user", content: userMessage },
-      ],
-    });
-
-    const textBlock = response.content.find(block => block.type === 'text');
-    const content = textBlock && textBlock.type === 'text' ? textBlock.text : '{}';
-    const analysis = extractJSON(content) as Record<string, unknown> | null;
-
-    if (!analysis) {
-      console.error('Failed to parse Claude response as JSON:', content);
-      return {
-        ...lead,
-        priority: 5,
-        priorityLabel: "Warm",
-        reasoning: "Analysis failed - please review manually",
-        suggestedAction: "Review manually",
-        estimatedValue: "Medium",
-      };
+  // Retry only on 429 (rate limit) and 529 (overloaded). Everything else is fatal.
+  // minTimeout=12s covers the 10-13s retry-after observed from Anthropic for the 5 RPM org tier.
+  const analysis = await pRetry(async () => {
+    let response;
+    try {
+      response = await anthropic.messages.create({
+        model: "claude-haiku-4-5",
+        max_tokens: 500,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userMessage }],
+      });
+    } catch (err: any) {
+      if (err?.status === 429 || err?.status === 529) {
+        throw err; // retriable
+      }
+      throw new AbortError(err instanceof Error ? err : new Error(String(err)));
     }
 
-    return {
-      ...lead,
-      priority: typeof analysis.priority === 'number' ? analysis.priority : 5,
-      priorityLabel: typeof analysis.priorityLabel === 'string' ? analysis.priorityLabel : "Warm",
-      reasoning: typeof analysis.reasoning === 'string' ? analysis.reasoning : "Unable to analyze",
-      suggestedAction: typeof analysis.suggestedAction === 'string' ? analysis.suggestedAction : "Review manually",
-      estimatedValue: typeof analysis.estimatedValue === 'string' ? analysis.estimatedValue : "Medium",
-      linkedInUrl: typeof analysis.linkedInUrl === 'string' ? analysis.linkedInUrl : undefined,
-    };
-  } catch (error) {
-    console.error('Error analyzing lead:', error);
-    return {
-      ...lead,
-      priority: 5,
-      priorityLabel: "Warm",
-      reasoning: "Analysis failed - please review manually",
-      suggestedAction: "Review manually",
-      estimatedValue: "Medium",
-    };
-  }
+    const textBlock = response.content.find(block => block.type === 'text');
+    const content = textBlock && textBlock.type === 'text' ? textBlock.text : '';
+    const parsed = extractJSON(content) as Record<string, unknown> | null;
+    if (!parsed) {
+      // Malformed output isn't a rate-limit issue — don't retry.
+      throw new AbortError(new Error(`Claude returned non-JSON: ${content.slice(0, 200)}`));
+    }
+    return parsed;
+  }, {
+    retries: 3,
+    minTimeout: 12000,
+    maxTimeout: 30000,
+    factor: 1.5,
+  });
+
+  return {
+    ...lead,
+    priority: typeof analysis.priority === 'number' ? analysis.priority : 5,
+    priorityLabel: (typeof analysis.priorityLabel === 'string' ? analysis.priorityLabel : "Warm") as ProcessedLead["priorityLabel"],
+    reasoning: typeof analysis.reasoning === 'string' ? analysis.reasoning : "Unable to analyze",
+    suggestedAction: typeof analysis.suggestedAction === 'string' ? analysis.suggestedAction : "Review manually",
+    estimatedValue: (typeof analysis.estimatedValue === 'string' ? analysis.estimatedValue : "Medium") as ProcessedLead["estimatedValue"],
+    linkedInUrl: typeof analysis.linkedInUrl === 'string' ? analysis.linkedInUrl : undefined,
+  };
 }
 
 // Process all leads for a job
@@ -262,26 +266,31 @@ async function processJob(jobId: string) {
     const batchResults: ProcessedLead[] = [];
     let batchErrors = 0;
 
-    await Promise.all(batch.map(async (lead) => {
+    // Cap concurrent Anthropic calls at 3 (enforced by the module-level anthropicLimit).
+    // p-retry inside analyzeLead handles 429/529 backoff, so no manual inter-batch sleep is needed.
+    await Promise.all(batch.map((lead) => anthropicLimit(async () => {
       try {
         const result = await analyzeLead(lead, job.prompt);
         await storage.addResult(jobId, result);
         batchResults.push(result);
       } catch (error) {
         batchErrors++;
-        // Create a fallback result for failed leads
-        const fallback: ProcessedLead = {
+        const errMsg = error instanceof Error ? error.message : String(error);
+        console.error(`Lead analysis failed for ${lead.name || lead.email || 'unknown'}:`, errMsg);
+        // Surface the real error in the result (no more fake priority=5 / "Warm" fallback).
+        // priority=1 / "Cold" + real error in reasoning makes failures clearly visible in the CSV.
+        const failed: ProcessedLead = {
           ...lead,
-          priority: 5,
-          priorityLabel: "Warm",
-          reasoning: "Analysis failed - please review manually",
-          suggestedAction: "Review manually",
-          estimatedValue: "Medium",
+          priority: 1,
+          priorityLabel: "Cold",
+          reasoning: `Analysis error: ${errMsg}`.slice(0, 500),
+          suggestedAction: "Re-run this lead or review manually",
+          estimatedValue: "Low",
         };
-        await storage.addResult(jobId, fallback);
-        batchResults.push(fallback);
+        await storage.addResult(jobId, failed);
+        batchResults.push(failed);
       }
-    }));
+    })));
 
     // Update counts after batch completes
     processedCount += batch.length;
@@ -289,8 +298,8 @@ async function processJob(jobId: string) {
     await storage.updateJobProgress(jobId, processedCount);
 
     // Send single batch completion event with summary
-    notifyJobListeners(jobId, { 
-      type: "batch_complete", 
+    notifyJobListeners(jobId, {
+      type: "batch_complete",
       batchNumber,
       totalBatches,
       processed: processedCount,
@@ -298,11 +307,6 @@ async function processJob(jobId: string) {
       errors: errorCount,
       batchResults: batchResults.slice(0, 3) // Send top 3 results as preview
     });
-
-    // Small delay between batches to avoid rate limiting
-    if (i + batchSize < job.leads.length) {
-      await new Promise(resolve => setTimeout(resolve, 200));
-    }
   }
 
   await storage.updateJobStatus(jobId, "completed");
