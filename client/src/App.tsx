@@ -10,6 +10,7 @@ import Processing from "@/pages/processing";
 import Results from "@/pages/results";
 import Privacy from "@/pages/privacy";
 import Terms from "@/pages/terms";
+import About from "@/pages/about";
 import NotFound from "@/pages/not-found";
 
 function Router() {
@@ -21,6 +22,7 @@ function Router() {
       <Route path="/results/:id" component={Results} />
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
+      <Route path="/about" component={About} />
       <Route component={NotFound} />
     </Switch>
   );

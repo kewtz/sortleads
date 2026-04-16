@@ -771,6 +771,13 @@ export default function Home() {
             </p>
             <div className="flex items-center gap-4">
               <Link
+                href="/about"
+                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                data-testid="link-footer-about"
+              >
+                About
+              </Link>
+              <Link
                 href="/privacy"
                 className="text-sm text-muted-foreground transition-colors hover:text-foreground"
                 data-testid="link-privacy"
