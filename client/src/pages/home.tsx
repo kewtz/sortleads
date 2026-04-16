@@ -26,6 +26,7 @@ import {
   Timer,
   ChevronDown,
   Sparkles,
+  Mail,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { trackCtaClicked, trackDemoStarted, trackPageView } from "@/lib/analytics";
@@ -652,11 +653,18 @@ export default function Home() {
                     data-testid={`button-tier-cta-${tier.name.toLowerCase()}`}
                     onClick={() => trackCtaClicked(`tier_${tier.name.toLowerCase()}`, "pricing")}
                   >
-                    <Link href="/upload">
-                      Start free
-                      <ArrowRight className="h-4 w-4" />
-                    </Link>
+                    <a
+                      href={`mailto:mike@bluechevronsolutions.com?subject=${encodeURIComponent(
+                        `SortLeads Annual License — ${tier.name}`,
+                      )}`}
+                    >
+                      <Mail className="h-4 w-4" />
+                      Contact for pricing
+                    </a>
                   </Button>
+                  <p className="mt-3 text-center text-xs text-muted-foreground">
+                    Annual site license · Unlimited users · Invoiced annually
+                  </p>
                 </CardContent>
               </Card>
             ))}
@@ -685,7 +693,14 @@ export default function Home() {
           </div>
 
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            Start free — no credit card required.
+            Want to try it first? Upload a sample list free from the{" "}
+            <button
+              onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+              className="text-primary underline-offset-2 hover:underline"
+            >
+              top of the page
+            </button>
+            .
           </p>
         </div>
       </section>
