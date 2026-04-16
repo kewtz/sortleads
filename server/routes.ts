@@ -668,7 +668,8 @@ export async function registerRoutes(
       const csv = resultsToCSV(results);
 
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', `attachment; filename="prioritized-${job.fileName}.csv"`);
+      const baseName = job.fileName.replace(/\.(csv|xlsx|xls|xlsm)$/i, '');
+      res.setHeader('Content-Disposition', `attachment; filename="prioritized-${baseName}.csv"`);
       // Security header to warn users about enabling macros
       res.setHeader('X-Content-Security-Warning', 'Do not enable macros or external content when opening this file');
       res.send(csv);
