@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -21,6 +21,28 @@ export const checkoutSessions = pgTable("checkout_sessions", {
   currency: text("currency").notNull().default("usd"),
   paymentStatus: text("payment_status").notNull(),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// Persistent job state — replaces the previous in-memory Map so jobs survive
+// Railway redeploys. `leads` is the input array (needed to resume processing);
+// `results` is the scored output array (appended to atomically via jsonb ||).
+export const jobs = pgTable("jobs", {
+  id: text("id").primaryKey(), // UUID string from randomUUID()
+  status: text("status").notNull().default("pending"),
+  totalLeads: integer("total_leads").notNull(),
+  processedLeads: integer("processed_leads").notNull().default(0),
+  prompt: text("prompt").notNull(),
+  fileName: text("file_name").notNull(),
+  leads: jsonb("leads").notNull(),
+  results: jsonb("results").notNull().default(sql`'[]'::jsonb`),
+  error: text("error"),
+  isDemo: boolean("is_demo").notNull().default(false),
+  stripeSessionId: text("stripe_session_id"),
+  paidAmountCents: integer("paid_amount_cents"),
+  email: text("email"),
+  freeLeadsApplied: integer("free_leads_applied"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+  updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
 });
 
 export const leadSchema = z.object({
@@ -132,3 +154,4 @@ export function calculatePrice(numLeads: number): Pricing {
 // Drizzle inferred types
 export type FreeTierUserRow = typeof freeTierUsers.$inferSelect;
 export type CheckoutSessionRow = typeof checkoutSessions.$inferSelect;
+export type JobRow = typeof jobs.$inferSelect;
