@@ -46,12 +46,12 @@ export default function AboutPage() {
             </h2>
             <div className="space-y-4 text-muted-foreground">
               <p>
-                My name is Mike. I run Blue Chevron Solutions — a commercial
-                operations practice focused on PE-backed manufacturing and
-                industrial companies.
+                My name is Mike Coutts. I run Blue Chevron Solutions — a
+                commercial operations practice focused on PE-backed manufacturing
+                and industrial companies.
               </p>
               <p>
-                For the better part of a decade, I've been walking into factories,
+                For the past 15 years, I've been walking into factories,
                 distributors, and industrial equipment companies and fixing the way
                 they manage their sales pipelines. Not by selling them software. By
                 doing the work: redesigning how they qualify leads, restructure
