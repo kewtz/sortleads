@@ -26,7 +26,6 @@ import {
   Timer,
   ChevronDown,
   Sparkles,
-  Mail,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { trackCtaClicked, trackDemoStarted, trackPageView } from "@/lib/analytics";
@@ -112,6 +111,7 @@ export default function Home() {
   const [demoPrompt, setDemoPrompt] = useState("");
   const [isDemoLoading, setIsDemoLoading] = useState(false);
   const [demoAvailable, setDemoAvailable] = useState(true);
+  const [checkoutTierLoading, setCheckoutTierLoading] = useState<string | null>(null);
 
   useEffect(() => {
     const savedJobId = localStorage.getItem("sortleads_active_job");
@@ -192,6 +192,35 @@ export default function Home() {
     const el = document.getElementById(id);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  const handleTierCheckout = async (tierKey: string) => {
+    setCheckoutTierLoading(tierKey);
+    trackCtaClicked(`tier_${tierKey}`, "pricing");
+    try {
+      const response = await fetch("/api/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tier: tierKey }),
+      });
+      if (!response.ok) {
+        const err = await response.json().catch(() => ({}));
+        throw new Error(err.error || "Checkout failed");
+      }
+      const { url } = await response.json();
+      if (!url) throw new Error("No checkout URL returned");
+      window.location.href = url;
+    } catch (error) {
+      toast({
+        title: "Checkout failed",
+        description:
+          error instanceof Error
+            ? error.message
+            : "Could not start checkout. Please try again.",
+        variant: "destructive",
+      });
+      setCheckoutTierLoading(null);
     }
   };
 
@@ -647,24 +676,24 @@ export default function Home() {
                   <p className="mb-6 text-sm text-muted-foreground">{tier.bestFor}</p>
 
                   <Button
-                    asChild
                     variant={tier.featured ? "default" : "outline"}
                     className="mt-auto w-full gap-2"
                     data-testid={`button-tier-cta-${tier.name.toLowerCase()}`}
-                    onClick={() => trackCtaClicked(`tier_${tier.name.toLowerCase()}`, "pricing")}
+                    onClick={() => handleTierCheckout(tier.name.toLowerCase())}
+                    disabled={checkoutTierLoading !== null}
                   >
-                    <a
-                      href={`mailto:mike@bluechevronsolutions.com?subject=${encodeURIComponent(
-                        `SortLeads Annual License — ${tier.name}`,
-                      )}`}
-                    >
-                      <Mail className="h-4 w-4" />
-                      Contact for pricing
-                    </a>
+                    {checkoutTierLoading === tier.name.toLowerCase() ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        Opening checkout...
+                      </>
+                    ) : (
+                      <>
+                        Get started
+                        <ArrowRight className="h-4 w-4" />
+                      </>
+                    )}
                   </Button>
-                  <p className="mt-3 text-center text-xs text-muted-foreground">
-                    Annual site license · Unlimited users · Invoiced annually
-                  </p>
                 </CardContent>
               </Card>
             ))}

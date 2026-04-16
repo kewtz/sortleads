@@ -752,70 +752,47 @@ export async function registerRoutes(
     }
   });
 
-  // Stripe: Create checkout session for lead processing
+  // Stripe: Create subscription checkout session for an annual tier.
+  // Pricing model is now an annual site license — tier determines which
+  // Stripe Price ID to use. Price IDs are injected via Railway env vars
+  // (STRIPE_PRICE_ESSENTIALS / _PROFESSIONAL / _PORTFOLIO) so they aren't
+  // hardcoded and can differ across environments.
   app.post('/api/checkout', async (req: Request, res: Response) => {
     try {
-      const { jobId } = req.body;
-      
-      if (!jobId) {
-        return res.status(400).json({ error: 'Job ID required' });
+      const { tier } = req.body as { tier?: string };
+
+      const tierKey = typeof tier === 'string' ? tier.toLowerCase() : '';
+      const priceIdByTier: Record<string, string | undefined> = {
+        essentials: process.env.STRIPE_PRICE_ESSENTIALS,
+        professional: process.env.STRIPE_PRICE_PROFESSIONAL,
+        portfolio: process.env.STRIPE_PRICE_PORTFOLIO,
+      };
+
+      if (!(tierKey in priceIdByTier)) {
+        return res.status(400).json({
+          error: "Invalid tier. Expected 'essentials', 'professional', or 'portfolio'.",
+        });
       }
 
-      const job = await storage.getJob(jobId);
-      if (!job) {
-        return res.status(404).json({ error: 'Job not found' });
+      const priceId = priceIdByTier[tierKey];
+      if (!priceId) {
+        console.error(`Missing Stripe price ID env var for tier: ${tierKey}`);
+        return res.status(500).json({ error: 'Subscription plan not configured on server' });
       }
-
-      // Calculate billable leads (total minus free tier applied)
-      const freeLeadsApplied = job.freeLeadsApplied || 0;
-      const billableLeads = job.totalLeads - freeLeadsApplied;
-
-      if (billableLeads <= 0) {
-        return res.status(400).json({ error: 'No payment required for this job' });
-      }
-
-      const pricing = calculatePrice(billableLeads);
-      const amountInCents = Math.round(pricing.subtotal * 100);
 
       const stripe = getStripeClient();
-      
-      const descParts = [`AI analysis of ${job.totalLeads} leads`];
-      if (freeLeadsApplied > 0) {
-        descParts.push(`(${freeLeadsApplied} free, ${billableLeads} billed)`);
-      }
-
       const session = await stripe.checkout.sessions.create({
-        payment_method_types: ['card'],
-        line_items: [{
-          price_data: {
-            currency: 'usd',
-            unit_amount: amountInCents,
-            product_data: {
-              name: 'SortLeads - Lead Prioritization',
-              description: descParts.join(' '),
-            },
-          },
-          quantity: 1,
-        }],
-        mode: 'payment',
+        mode: 'subscription',
+        line_items: [{ price: priceId, quantity: 1 }],
         allow_promotion_codes: true,
-        customer_email: job.email || undefined,
-        success_url: `${req.protocol}://${req.get('host')}/processing/${jobId}?paid=true`,
-        cancel_url: `${req.protocol}://${req.get('host')}/upload?cancelled=true`,
-        metadata: {
-          jobId,
-          leadCount: String(job.totalLeads),
-          billableLeads: String(billableLeads),
-          freeLeadsApplied: String(freeLeadsApplied),
-        },
+        success_url: `${req.protocol}://${req.get('host')}/upload?subscribed=true`,
+        cancel_url: `${req.protocol}://${req.get('host')}/?cancelled=true`,
+        metadata: { tier: tierKey },
       });
 
-      // Store session ID on job for later verification
-      await storage.updateJob(jobId, { stripeSessionId: session.id });
-      
       res.json({ url: session.url, sessionId: session.id });
     } catch (error) {
-      console.error('Error creating checkout session:', error);
+      console.error('Error creating subscription checkout session:', error);
       res.status(500).json({ error: 'Failed to create checkout session' });
     }
   });
