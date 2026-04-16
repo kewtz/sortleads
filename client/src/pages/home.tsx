@@ -5,35 +5,30 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Upload, 
-  Zap, 
-  Download, 
+import {
+  Upload,
+  Zap,
+  Download,
   CheckCircle2,
   ArrowRight,
-  Clock,
   Target,
-  TrendingUp,
   AlertCircle,
   Play,
   Loader2,
   X,
-  BarChart3,
-  Users,
-  Timer,
+  FileSpreadsheet,
   Flame,
   ThermometerSun,
   Snowflake,
-  DollarSign,
-  Gift,
+  Factory,
+  Building2,
   Briefcase,
-  GraduationCap,
-  UserCheck,
-  ChevronDown
+  Timer,
+  ChevronDown,
+  Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { trackCtaClicked, trackDemoStarted, trackPageView } from "@/lib/analytics";
-import { FREE_TIER_LEAD_LIMIT, PRICE_PER_LEAD } from "@/lib/types";
 
 const SAMPLE_SCORED_LEADS = [
   {
@@ -42,7 +37,8 @@ const SAMPLE_SCORED_LEADS = [
     title: "CTO",
     priority: "Hot" as const,
     score: 9,
-    reasoning: "C-level exec at a growing tech company with 25-50 employees. Strong decision-making authority and likely evaluating automation tools. High urgency to scale operations.",
+    reasoning:
+      "C-level exec at a growing tech company with 25-50 employees. Strong decision-making authority and likely evaluating automation tools. High urgency to scale operations.",
     action: "Call directly - reference their recent Series A funding and offer a personalized demo.",
   },
   {
@@ -51,7 +47,8 @@ const SAMPLE_SCORED_LEADS = [
     title: "VP of Engineering",
     priority: "Hot" as const,
     score: 8,
-    reasoning: "VP-level at a 500+ employee manufacturing company. Perfect ICP match for industrial automation. Company size indicates budget availability.",
+    reasoning:
+      "VP-level at a 500+ employee manufacturing company. Perfect ICP match for industrial automation. Company size indicates budget availability.",
     action: "Send personalized email highlighting ROI case studies from similar manufacturers.",
   },
   {
@@ -60,7 +57,8 @@ const SAMPLE_SCORED_LEADS = [
     title: "Procurement Manager",
     priority: "Warm" as const,
     score: 6,
-    reasoning: "Mid-level role at a large retail company. May influence purchasing decisions but likely not the final decision-maker. Industry is adjacent but not core ICP.",
+    reasoning:
+      "Mid-level role at a large retail company. May influence purchasing decisions but likely not the final decision-maker. Industry is adjacent but not core ICP.",
     action: "Add to nurture sequence - share industry report on retail automation trends.",
   },
   {
@@ -69,8 +67,39 @@ const SAMPLE_SCORED_LEADS = [
     title: "Owner",
     priority: "Cold" as const,
     score: 3,
-    reasoning: "Very small company (1-10 employees) in consulting. Limited budget and not in target industry. Low probability of conversion at this time.",
+    reasoning:
+      "Very small company (1-10 employees) in consulting. Limited budget and not in target industry. Low probability of conversion at this time.",
     action: "Skip for now - add to quarterly newsletter for long-term nurturing.",
+  },
+];
+
+interface PricingTier {
+  name: string;
+  annual: string;
+  monthly: string;
+  bestFor: string;
+  featured?: boolean;
+}
+
+const PRICING_TIERS: PricingTier[] = [
+  {
+    name: "Essentials",
+    annual: "$948/year",
+    monthly: "$79/mo",
+    bestFor: "Single sales team, up to 500 leads/month",
+  },
+  {
+    name: "Professional",
+    annual: "$1,788/year",
+    monthly: "$149/mo",
+    bestFor: "Growing teams, up to 2,000 leads/month",
+    featured: true,
+  },
+  {
+    name: "Portfolio",
+    annual: "$4,188/year",
+    monthly: "$349/mo",
+    bestFor: "Multi-site or PE portfolio use across portcos",
   },
 ];
 
@@ -84,31 +113,31 @@ export default function Home() {
   const [demoAvailable, setDemoAvailable] = useState(true);
 
   useEffect(() => {
-    const savedJobId = localStorage.getItem('sortleads_active_job');
+    const savedJobId = localStorage.getItem("sortleads_active_job");
     if (savedJobId) {
       fetch(`/api/jobs/${savedJobId}`)
-        .then(res => res.json())
-        .then(job => {
-          if (job && job.status !== 'completed' && job.status !== 'failed') {
+        .then((res) => res.json())
+        .then((job) => {
+          if (job && job.status !== "completed" && job.status !== "failed") {
             setActiveJobId(savedJobId);
-          } else if (job && job.status === 'completed') {
-            localStorage.removeItem('sortleads_active_job');
+          } else if (job && job.status === "completed") {
+            localStorage.removeItem("sortleads_active_job");
             setLocation(`/results/${savedJobId}`);
           } else {
-            localStorage.removeItem('sortleads_active_job');
+            localStorage.removeItem("sortleads_active_job");
           }
         })
         .catch(() => {
-          localStorage.removeItem('sortleads_active_job');
+          localStorage.removeItem("sortleads_active_job");
         });
     }
 
-    fetch('/api/demo/available')
-      .then(res => res.json())
-      .then(data => setDemoAvailable(data.available))
+    fetch("/api/demo/available")
+      .then((res) => res.json())
+      .then((data) => setDemoAvailable(data.available))
       .catch(() => setDemoAvailable(true));
 
-    trackPageView('home');
+    trackPageView("home");
   }, [setLocation]);
 
   const handleDemoSubmit = async () => {
@@ -124,9 +153,9 @@ export default function Home() {
     setIsDemoLoading(true);
     trackDemoStarted();
     try {
-      const response = await fetch('/api/demo', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/demo", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: demoPrompt }),
       });
 
@@ -141,11 +170,11 @@ export default function Home() {
           setDemoAvailable(false);
           return;
         }
-        throw new Error(error.error || 'Failed to start demo');
+        throw new Error(error.error || "Failed to start demo");
       }
 
       const data = await response.json();
-      localStorage.setItem('sortleads_active_job', data.jobId);
+      localStorage.setItem("sortleads_active_job", data.jobId);
       setLocation(data.redirect);
     } catch (error) {
       toast({
@@ -161,25 +190,33 @@ export default function Home() {
   const scrollToSection = (id: string) => {
     const el = document.getElementById(id);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
 
   const getPriorityBadgeClass = (priority: string) => {
     switch (priority) {
-      case 'Hot': return 'bg-red-500 dark:bg-red-600 text-white';
-      case 'Warm': return 'bg-amber-500 dark:bg-amber-600 text-white';
-      case 'Cold': return 'bg-slate-400 dark:bg-slate-500 text-white';
-      default: return '';
+      case "Hot":
+        return "bg-red-500 dark:bg-red-600 text-white";
+      case "Warm":
+        return "bg-amber-500 dark:bg-amber-600 text-white";
+      case "Cold":
+        return "bg-slate-400 dark:bg-slate-500 text-white";
+      default:
+        return "";
     }
   };
 
   const getPriorityIcon = (priority: string) => {
     switch (priority) {
-      case 'Hot': return <Flame className="h-3.5 w-3.5" />;
-      case 'Warm': return <ThermometerSun className="h-3.5 w-3.5" />;
-      case 'Cold': return <Snowflake className="h-3.5 w-3.5" />;
-      default: return null;
+      case "Hot":
+        return <Flame className="h-3.5 w-3.5" />;
+      case "Warm":
+        return <ThermometerSun className="h-3.5 w-3.5" />;
+      case "Cold":
+        return <Snowflake className="h-3.5 w-3.5" />;
+      default:
+        return null;
     }
   };
 
@@ -193,11 +230,7 @@ export default function Home() {
               <AlertCircle className="h-4 w-4 text-primary" />
               <span className="text-sm">You have leads still being processed</span>
             </div>
-            <Button 
-              size="sm" 
-              asChild
-              data-testid="button-continue-processing"
-            >
+            <Button size="sm" asChild data-testid="button-continue-processing">
               <Link href={`/processing/${activeJobId}`}>
                 Continue
                 <ArrowRight className="ml-1 h-3 w-3" />
@@ -213,45 +246,57 @@ export default function Home() {
           <div className="mx-auto max-w-4xl text-center">
             <div className="mb-6 inline-flex items-center gap-2 rounded-full border bg-card px-4 py-2 text-sm">
               <Zap className="h-4 w-4 text-primary" />
-              <span className="text-muted-foreground">AI-Powered Lead Prioritization</span>
+              <span className="text-muted-foreground">AI lead prioritization for industrial teams</span>
             </div>
-            
-            <h1 className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl" data-testid="text-hero-headline">
-              Stop Guessing Which{" "}
-              <span className="text-primary">Leads to Call First</span>
+
+            <h1
+              className="mb-6 text-4xl font-bold tracking-tight sm:text-5xl md:text-6xl"
+              data-testid="text-hero-headline"
+            >
+              Your reps are spending Monday morning sorting a spreadsheet.{" "}
+              <span className="text-primary">That's the problem.</span>
             </h1>
-            
-            <p className="mx-auto mb-8 max-w-2xl text-lg text-muted-foreground md:text-xl" data-testid="text-hero-subheadline">
-              Upload your spreadsheet, tell us what matters, and get a prioritized list 
-              with next steps in under 2 minutes. First {FREE_TIER_LEAD_LIMIT} leads free, then just ${PRICE_PER_LEAD}/lead.
+
+            <p
+              className="mx-auto mb-8 max-w-2xl text-lg text-muted-foreground md:text-xl"
+              data-testid="text-hero-subheadline"
+            >
+              SortLeads scores and prioritizes your lead list in 90 seconds — so your team works the
+              right accounts from the first call.
             </p>
-            
+
             <div className="flex flex-col items-center justify-center gap-4 sm:flex-row">
-              <Button size="lg" asChild className="gap-2" data-testid="button-get-started" onClick={() => trackCtaClicked('sort_leads_free', 'hero')}>
+              <Button
+                size="lg"
+                asChild
+                className="gap-2"
+                data-testid="button-get-started"
+                onClick={() => trackCtaClicked("try_free_upload", "hero")}
+              >
                 <Link href="/upload">
-                  Sort Your First {FREE_TIER_LEAD_LIMIT} Leads Free
+                  Try it free — upload a list
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
               {demoAvailable && (
-                <Button 
-                  size="lg" 
-                  variant="outline" 
+                <Button
+                  size="lg"
+                  variant="outline"
                   className="gap-2"
                   onClick={() => setShowDemoModal(true)}
                   data-testid="button-try-demo"
                 >
                   <Play className="h-4 w-4" />
-                  Try With Sample Data
+                  See a live demo
                 </Button>
               )}
             </div>
             <p className="mt-4 text-sm text-muted-foreground">
-              No credit card required. No CRM needed. Upload and see results in minutes.
+              No account required. No CRM needed. Results in 90 seconds.
             </p>
 
             <button
-              onClick={() => scrollToSection('sample-output')}
+              onClick={() => scrollToSection("sample-output")}
               className="mt-8 inline-flex animate-bounce items-center gap-1 text-sm text-muted-foreground transition-colors hover:text-foreground"
               data-testid="button-scroll-preview"
             >
@@ -260,160 +305,29 @@ export default function Home() {
             </button>
           </div>
         </div>
-        
+
         <div className="pointer-events-none absolute -bottom-1/2 -right-1/4 h-[600px] w-[600px] rounded-full bg-primary/5 blur-3xl" />
         <div className="pointer-events-none absolute -left-1/4 -top-1/2 h-[600px] w-[600px] rounded-full bg-accent/5 blur-3xl" />
       </section>
 
-      {/* Sample Lead Scoring Output */}
-      <section id="sample-output" className="py-20" data-testid="section-sample-output">
+      {/* Problem Section */}
+      <section id="problem" className="py-20" data-testid="section-problem">
         <div className="container mx-auto px-4">
-          <div className="mx-auto mb-12 max-w-2xl text-center">
-            <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
-              See What You Get
+          <div className="mx-auto max-w-3xl">
+            <h2 className="mb-6 text-center text-3xl font-bold tracking-tight md:text-4xl">
+              Every week, something kills pipeline before it starts.
             </h2>
-            <p className="text-lg text-muted-foreground">
-              Every lead scored, ranked, and paired with a clear next step. Here's a sample of real AI output.
-            </p>
-          </div>
-
-          <div className="mx-auto max-w-4xl space-y-4">
-            {SAMPLE_SCORED_LEADS.map((lead, index) => (
-              <Card key={index} data-testid={`card-sample-lead-${index}`}>
-                <CardContent className="p-5">
-                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                    <div className="flex-1 space-y-3">
-                      <div className="flex flex-wrap items-center gap-3">
-                        <span className="font-semibold">{lead.name}</span>
-                        <span className="text-sm text-muted-foreground">{lead.title} at {lead.company}</span>
-                        <Badge className={`gap-1 ${getPriorityBadgeClass(lead.priority)}`}>
-                          {getPriorityIcon(lead.priority)}
-                          {lead.priority}
-                        </Badge>
-                        <span className="text-sm font-medium text-muted-foreground">Score: {lead.score}/10</span>
-                      </div>
-                      <div>
-                        <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">AI Analysis</p>
-                        <p className="text-sm text-muted-foreground">{lead.reasoning}</p>
-                      </div>
-                      <div>
-                        <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">Suggested Action</p>
-                        <p className="text-sm font-medium text-primary">{lead.action}</p>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
-          </div>
-
-          <div className="mx-auto mt-8 max-w-4xl text-center">
-            <Button size="lg" asChild className="gap-2" data-testid="button-cta-after-preview" onClick={() => trackCtaClicked('sort_leads_free', 'sample_output')}>
-              <Link href="/upload">
-                Try It With Your Leads
-                <ArrowRight className="h-4 w-4" />
-              </Link>
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      {/* Who Is This For? */}
-      <section id="who-its-for" className="border-y bg-card py-20" data-testid="section-who-its-for">
-        <div className="container mx-auto px-4">
-          <div className="mx-auto mb-12 max-w-2xl text-center">
-            <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
-              Built for Reps Who Were Promoted Into Sales
-            </h2>
-            <p className="text-lg text-muted-foreground">
-              Not trained on enterprise software. Not interested in a 6-month CRM rollout. 
-              Just need to know which leads to call first.
-            </p>
-          </div>
-
-          <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-3">
-            <Card>
-              <CardContent className="p-6 text-center">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                  <Briefcase className="h-6 w-6 text-primary" />
-                </div>
-                <h3 className="mb-2 font-semibold">The Trade Show Rep</h3>
-                <p className="text-sm text-muted-foreground">
-                  You came back from the conference with 300 business cards. 
-                  Now you need to figure out who to call Monday morning.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-6 text-center">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                  <GraduationCap className="h-6 w-6 text-primary" />
-                </div>
-                <h3 className="mb-2 font-semibold">The New Sales Hire</h3>
-                <p className="text-sm text-muted-foreground">
-                  You got handed a list of 1,000 leads and told to "start calling." 
-                  No scoring system, no prioritization, just a spreadsheet.
-                </p>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardContent className="p-6 text-center">
-                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
-                  <UserCheck className="h-6 w-6 text-primary" />
-                </div>
-                <h3 className="mb-2 font-semibold">The Solo Founder</h3>
-                <p className="text-sm text-muted-foreground">
-                  You bought a lead list but don't have time to research every name. 
-                  You need to focus on the ones most likely to buy.
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-      </section>
-
-      {/* Social Proof / Pain Point Stats */}
-      <section id="stats" className="py-16" data-testid="section-social-proof">
-        <div className="container mx-auto px-4">
-          <div className="mx-auto mb-10 max-w-2xl text-center">
-            <h2 className="mb-3 text-2xl font-bold tracking-tight md:text-3xl">
-              The Lead Problem Is Real
-            </h2>
-            <p className="text-muted-foreground">
-              Most sales teams are leaving money on the table with unscored leads.
-            </p>
-          </div>
-          <div className="mx-auto grid max-w-4xl grid-cols-1 gap-6 sm:grid-cols-2 lg:grid-cols-4">
-            <Card>
-              <CardContent className="flex flex-col items-center p-6 text-center">
-                <Timer className="mb-3 h-6 w-6 text-muted-foreground" />
-                <div className="mb-1 text-3xl font-bold text-primary" data-testid="stat-time-wasted">67%</div>
-                <p className="text-sm text-muted-foreground">of sales rep time is spent on unqualified leads</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="flex flex-col items-center p-6 text-center">
-                <Users className="mb-3 h-6 w-6 text-muted-foreground" />
-                <div className="mb-1 text-3xl font-bold text-primary" data-testid="stat-leads-ignored">79%</div>
-                <p className="text-sm text-muted-foreground">of marketing leads never convert to sales</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="flex flex-col items-center p-6 text-center">
-                <BarChart3 className="mb-3 h-6 w-6 text-muted-foreground" />
-                <div className="mb-1 text-3xl font-bold text-primary" data-testid="stat-no-scoring">46%</div>
-                <p className="text-sm text-muted-foreground">of sales teams have no lead scoring system</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="flex flex-col items-center p-6 text-center">
-                <TrendingUp className="mb-3 h-6 w-6 text-muted-foreground" />
-                <div className="mb-1 text-3xl font-bold text-primary" data-testid="stat-revenue-lift">20%</div>
-                <p className="text-sm text-muted-foreground">more revenue from prioritized outreach</p>
-              </CardContent>
-            </Card>
+            <div className="space-y-4 text-center text-lg text-muted-foreground">
+              <p>
+                Most manufacturing and industrial sales teams inherit their leads in a spreadsheet.
+                No scoring, no ranking, no signal — just a list. Reps sort it by gut feel, call the
+                familiar names first, and leave the best-fit accounts sitting untouched until Friday.
+              </p>
+              <p className="font-medium text-foreground">
+                That's not a CRM problem. It's a prioritization problem.
+              </p>
+              <p>SortLeads fixes it in one step.</p>
+            </div>
           </div>
         </div>
       </section>
@@ -423,10 +337,10 @@ export default function Home() {
         <div className="container mx-auto px-4">
           <div className="mx-auto mb-16 max-w-2xl text-center">
             <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
-              How It Works
+              Three steps. Ninety seconds.
             </h2>
             <p className="text-lg text-muted-foreground">
-              From messy spreadsheet to prioritized action plan in under 2 minutes.
+              Your reps start the week on the right accounts. Not the familiar ones.
             </p>
           </div>
 
@@ -439,10 +353,9 @@ export default function Home() {
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <Upload className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="mb-2 text-xl font-semibold">Upload</h3>
+                <h3 className="mb-2 text-xl font-semibold">Upload your list</h3>
                 <p className="text-muted-foreground">
-                  Drop your CSV or Excel file - trade show lists, purchased contacts, 
-                  CRM exports. Any lead list works.
+                  CSV or Excel. Company names, contacts, whatever you have.
                 </p>
               </CardContent>
             </Card>
@@ -455,10 +368,9 @@ export default function Home() {
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
                   <Target className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="mb-2 text-xl font-semibold">Score</h3>
+                <h3 className="mb-2 text-xl font-semibold">Describe your ideal customer</h3>
                 <p className="text-muted-foreground">
-                  AI reads every lead and scores them against your ideal customer profile. 
-                  Hot, Warm, or Cold - instantly.
+                  In plain English. No configuration, no scoring rubrics.
                 </p>
               </CardContent>
             </Card>
@@ -469,12 +381,11 @@ export default function Home() {
               </div>
               <CardContent className="pt-8">
                 <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-lg bg-primary/10">
-                  <CheckCircle2 className="h-6 w-6 text-primary" />
+                  <Download className="h-6 w-6 text-primary" />
                 </div>
-                <h3 className="mb-2 text-xl font-semibold">Close</h3>
+                <h3 className="mb-2 text-xl font-semibold">Download your ranked list</h3>
                 <p className="text-muted-foreground">
-                  Download your sorted list with suggested next steps for every lead. 
-                  Call the hottest ones first.
+                  Hot, Warm, and Cold leads sorted and ready to work.
                 </p>
               </CardContent>
             </Card>
@@ -482,143 +393,160 @@ export default function Home() {
         </div>
       </section>
 
-      {/* Pricing Section */}
-      <section id="pricing" className="py-20" data-testid="section-pricing">
+      {/* Sample Output — kept from previous version as a concrete illustration of the ranked output */}
+      <section id="sample-output" className="py-20" data-testid="section-sample-output">
         <div className="container mx-auto px-4">
           <div className="mx-auto mb-12 max-w-2xl text-center">
             <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
-              Simple, Transparent Pricing
+              Every lead, a clear next step
             </h2>
             <p className="text-lg text-muted-foreground">
-              No subscriptions. No contracts. No hidden fees. Just pay for what you use.
+              Hot / Warm / Cold classification with a rationale and suggested action per lead.
+              Here's a sample of real AI output.
             </p>
           </div>
 
-          <div className="mx-auto max-w-lg">
-            <Card>
-              <CardContent className="p-8">
-                <div className="mb-6 text-center">
-                  <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-green-500/10 px-4 py-1.5">
-                    <Gift className="h-4 w-4 text-green-600 dark:text-green-400" />
-                    <span className="text-sm font-medium text-green-600 dark:text-green-400">First {FREE_TIER_LEAD_LIMIT} leads free</span>
+          <div className="mx-auto max-w-4xl space-y-4">
+            {SAMPLE_SCORED_LEADS.map((lead, index) => (
+              <Card key={index} data-testid={`card-sample-lead-${index}`}>
+                <CardContent className="p-5">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="flex-1 space-y-3">
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span className="font-semibold">{lead.name}</span>
+                        <span className="text-sm text-muted-foreground">
+                          {lead.title} at {lead.company}
+                        </span>
+                        <Badge className={`gap-1 ${getPriorityBadgeClass(lead.priority)}`}>
+                          {getPriorityIcon(lead.priority)}
+                          {lead.priority}
+                        </Badge>
+                        <span className="text-sm font-medium text-muted-foreground">
+                          Score: {lead.score}/10
+                        </span>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">
+                          AI Analysis
+                        </p>
+                        <p className="text-sm text-muted-foreground">{lead.reasoning}</p>
+                      </div>
+                      <div>
+                        <p className="mb-1 text-xs font-medium uppercase text-muted-foreground">
+                          Suggested Action
+                        </p>
+                        <p className="text-sm font-medium text-primary">{lead.action}</p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="mt-4 flex items-baseline justify-center gap-1">
-                    <span className="text-5xl font-bold">${PRICE_PER_LEAD}</span>
-                    <span className="text-lg text-muted-foreground">/ lead after that</span>
-                  </div>
-                  <p className="mt-2 text-sm text-muted-foreground">$1.00 minimum per order</p>
-                </div>
-
-                <div className="mb-6 space-y-3">
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span className="text-sm">No credit card for first {FREE_TIER_LEAD_LIMIT} leads</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span className="text-sm">AI scoring with reasoning for every lead</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span className="text-sm">Suggested next steps (call, email, skip)</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span className="text-sm">Download prioritized CSV</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                    <span className="text-sm">Results in under 2 minutes</span>
-                  </div>
-                </div>
-
-                <div className="mb-4 rounded-lg border bg-muted/50 p-4">
-                  <p className="mb-2 text-xs font-medium uppercase text-muted-foreground">Example</p>
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-sm">200 leads uploaded</span>
-                    <span className="text-sm font-medium">
-                      {FREE_TIER_LEAD_LIMIT} free + 150 x ${PRICE_PER_LEAD} = <strong>$12.00</strong>
-                    </span>
-                  </div>
-                </div>
-
-                <Button size="lg" asChild className="w-full gap-2" data-testid="button-cta-pricing" onClick={() => trackCtaClicked('sort_leads_free', 'pricing')}>
-                  <Link href="/upload">
-                    Get Started Free
-                    <ArrowRight className="h-4 w-4" />
-                  </Link>
-                </Button>
-
-                <p className="mt-3 text-center text-xs text-muted-foreground">
-                  Competitive with Clay, Apollo, and other lead scoring tools - without the monthly subscription.
-                </p>
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            ))}
           </div>
+
+          <div className="mx-auto mt-8 max-w-4xl text-center">
+            <Button
+              size="lg"
+              asChild
+              className="gap-2"
+              data-testid="button-cta-after-preview"
+              onClick={() => trackCtaClicked("try_free_upload", "sample_output")}
+            >
+              <Link href="/upload">
+                Try it with your leads
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </div>
+        </div>
+      </section>
+
+      {/* Results Callout */}
+      <section className="border-y bg-card py-16" data-testid="section-results-callout">
+        <div className="container mx-auto px-4">
+          <Card className="mx-auto max-w-3xl border-primary/30">
+            <CardContent className="flex flex-col items-center gap-4 p-8 text-center md:p-12">
+              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                <Timer className="h-6 w-6 text-primary" />
+              </div>
+              <p className="text-2xl font-semibold md:text-3xl">
+                44 leads scored, ranked, and ready to work in under 90 seconds.
+              </p>
+              <p className="text-muted-foreground">
+                Hot leads surface in the first 17 seconds. No waiting for a batch run overnight.
+              </p>
+            </CardContent>
+          </Card>
         </div>
       </section>
 
       {/* Features */}
-      <section id="features" className="border-y bg-card py-20" data-testid="section-features">
+      <section id="features" className="py-20" data-testid="section-features">
         <div className="container mx-auto px-4">
-          <div className="mx-auto mb-16 max-w-2xl text-center">
+          <div className="mx-auto mb-12 max-w-2xl text-center">
             <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
-              Why SortLeads?
+              Built for teams that run on spreadsheets, not enterprise software.
             </h2>
-            <p className="text-lg text-muted-foreground">
-              No setup, no training, no IT department needed.
-            </p>
           </div>
 
-          <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-2">
-            <div className="flex gap-4 rounded-lg border bg-background p-6">
+          <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-2 lg:grid-cols-3">
+            <div className="flex gap-4 rounded-lg border bg-card p-6">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <Clock className="h-5 w-5 text-primary" />
+                <Flame className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <h3 className="mb-2 font-semibold">Save Hours of Manual Work</h3>
+                <h3 className="mb-2 font-semibold">Instant prioritization</h3>
                 <p className="text-sm text-muted-foreground">
-                  Stop scrolling through endless rows. AI analyzes and prioritizes 
-                  your leads in minutes, not hours.
+                  Hot / Warm / Cold classification with a rationale for each score.
                 </p>
               </div>
             </div>
 
-            <div className="flex gap-4 rounded-lg border bg-background p-6">
+            <div className="flex gap-4 rounded-lg border bg-card p-6">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <TrendingUp className="h-5 w-5 text-primary" />
+                <Target className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <h3 className="mb-2 font-semibold">Focus on High-Value Leads</h3>
+                <h3 className="mb-2 font-semibold">Suggested next steps</h3>
                 <p className="text-sm text-muted-foreground">
-                  AI identifies your hottest prospects based on your criteria, 
-                  so you can prioritize your outreach.
+                  Tailored action for every lead — not a generic follow-up template.
                 </p>
               </div>
             </div>
 
-            <div className="flex gap-4 rounded-lg border bg-background p-6">
+            <div className="flex gap-4 rounded-lg border bg-card p-6">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <CheckCircle2 className="h-5 w-5 text-primary" />
+                <Sparkles className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <h3 className="mb-2 font-semibold">Clear Next Steps</h3>
+                <h3 className="mb-2 font-semibold">No CRM required</h3>
                 <p className="text-sm text-muted-foreground">
-                  Each lead comes with a suggested action - call, email, or skip. 
-                  No more guessing what to do next.
+                  Works with whatever you have: a trade show list, a broker referral list, a
+                  Salesforce export.
                 </p>
               </div>
             </div>
 
-            <div className="flex gap-4 rounded-lg border bg-background p-6">
+            <div className="flex gap-4 rounded-lg border bg-card p-6">
               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                <DollarSign className="h-5 w-5 text-primary" />
+                <Download className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <h3 className="mb-2 font-semibold">Easy to Expense</h3>
+                <h3 className="mb-2 font-semibold">Downloadable output</h3>
                 <p className="text-sm text-muted-foreground">
-                  One-time payment per list. No subscriptions or contracts. 
-                  Simple receipt for expense reports.
+                  Ranked CSV ready to hand to your team or import anywhere.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-4 rounded-lg border bg-card p-6">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                <FileSpreadsheet className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h3 className="mb-2 font-semibold">Works on any list</h3>
+                <p className="text-sm text-muted-foreground">
+                  Contact lists, account lists, conference attendees, inbound inquiries.
                 </p>
               </div>
             </div>
@@ -626,21 +554,162 @@ export default function Home() {
         </div>
       </section>
 
-      {/* CTA Section */}
+      {/* Who It's For */}
+      <section id="who-its-for" className="border-y bg-card py-20" data-testid="section-who-its-for">
+        <div className="container mx-auto px-4">
+          <div className="mx-auto mb-12 max-w-3xl text-center">
+            <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
+              Designed for commercial ops teams at manufacturing and industrial companies.
+            </h2>
+            <div className="space-y-4 text-left text-lg text-muted-foreground">
+              <p>
+                SortLeads is built for sales teams that move fast and don't have six months to
+                configure a scoring model. If your leads live in a spreadsheet — trade show
+                contacts, distributor referrals, inbound web forms — SortLeads turns them into a
+                prioritized call list before your morning standup.
+              </p>
+              <p>
+                PE portfolio companies use it to sharpen commercial execution during hold periods,
+                without adding headcount or software overhead.
+              </p>
+            </div>
+          </div>
+
+          <div className="mx-auto grid max-w-4xl gap-6 md:grid-cols-3">
+            <Card>
+              <CardContent className="p-6 text-center">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                  <Factory className="h-6 w-6 text-primary" />
+                </div>
+                <h3 className="mb-2 font-semibold">Manufacturing & Industrial</h3>
+                <p className="text-sm text-muted-foreground">
+                  Trade show contacts, distributor referrals, and inbound inquiries prioritized
+                  before Monday standup.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6 text-center">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                  <Building2 className="h-6 w-6 text-primary" />
+                </div>
+                <h3 className="mb-2 font-semibold">PE Portfolio Companies</h3>
+                <p className="text-sm text-muted-foreground">
+                  Sharpen commercial execution during hold periods without adding headcount or
+                  software overhead.
+                </p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardContent className="p-6 text-center">
+                <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-primary/10">
+                  <Briefcase className="h-6 w-6 text-primary" />
+                </div>
+                <h3 className="mb-2 font-semibold">Commercial Ops Teams</h3>
+                <p className="text-sm text-muted-foreground">
+                  Sales teams that move fast and don't have six months to configure a scoring
+                  model.
+                </p>
+              </CardContent>
+            </Card>
+          </div>
+        </div>
+      </section>
+
+      {/* Pricing */}
+      <section id="pricing" className="py-20" data-testid="section-pricing">
+        <div className="container mx-auto px-4">
+          <div className="mx-auto mb-12 max-w-2xl text-center">
+            <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
+              Annual site license. Unlimited users. No per-seat fees.
+            </h2>
+          </div>
+
+          <div className="mx-auto grid max-w-5xl gap-6 md:grid-cols-3">
+            {PRICING_TIERS.map((tier) => (
+              <Card
+                key={tier.name}
+                className={`flex flex-col ${tier.featured ? "border-primary shadow-lg" : ""}`}
+                data-testid={`card-tier-${tier.name.toLowerCase()}`}
+              >
+                <CardContent className="flex flex-1 flex-col p-6">
+                  {tier.featured && (
+                    <Badge className="mb-3 w-fit bg-primary text-primary-foreground">Most popular</Badge>
+                  )}
+                  <h3 className="mb-1 text-2xl font-bold">{tier.name}</h3>
+                  <div className="mb-1 flex items-baseline gap-2">
+                    <span className="text-3xl font-bold">{tier.annual}</span>
+                  </div>
+                  <p className="mb-4 text-sm text-muted-foreground">{tier.monthly}</p>
+                  <p className="mb-6 text-sm text-muted-foreground">{tier.bestFor}</p>
+
+                  <Button
+                    asChild
+                    variant={tier.featured ? "default" : "outline"}
+                    className="mt-auto w-full gap-2"
+                    data-testid={`button-tier-cta-${tier.name.toLowerCase()}`}
+                    onClick={() => trackCtaClicked(`tier_${tier.name.toLowerCase()}`, "pricing")}
+                  >
+                    <Link href="/upload">
+                      Start free
+                      <ArrowRight className="h-4 w-4" />
+                    </Link>
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          <div className="mx-auto mt-10 max-w-3xl">
+            <Card className="bg-muted/40">
+              <CardContent className="p-6">
+                <p className="mb-3 text-sm font-medium">All plans include:</p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {[
+                    "Unlimited users",
+                    "CSV/Excel upload",
+                    "Hot / Warm / Cold scoring",
+                    "Suggested next steps",
+                    "Downloadable output",
+                  ].map((item) => (
+                    <div key={item} className="flex items-center gap-2">
+                      <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                      <span className="text-sm">{item}</span>
+                    </div>
+                  ))}
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          <p className="mt-6 text-center text-sm text-muted-foreground">
+            Start free — no credit card required.
+          </p>
+        </div>
+      </section>
+
+      {/* Footer CTA */}
       <section className="py-20">
         <div className="container mx-auto px-4">
           <Card className="mx-auto max-w-3xl overflow-hidden">
             <CardContent className="p-8 text-center md:p-12">
               <h2 className="mb-4 text-2xl font-bold md:text-3xl">
-                Stop Wasting Time on Cold Leads
+                Upload your next lead list. See who's actually worth calling.
               </h2>
               <p className="mx-auto mb-8 max-w-xl text-muted-foreground">
-                Upload your lead list and get the first {FREE_TIER_LEAD_LIMIT} scored free. 
-                No credit card needed. See which leads to call first.
+                No account required to start. Import your list and see results in 90 seconds.
               </p>
-              <Button size="lg" asChild className="gap-2" data-testid="button-cta-start" onClick={() => trackCtaClicked('sort_leads_free', 'bottom_cta')}>
+              <Button
+                size="lg"
+                asChild
+                className="gap-2"
+                data-testid="button-cta-start"
+                onClick={() => trackCtaClicked("try_free_upload", "bottom_cta")}
+              >
                 <Link href="/upload">
-                  Sort Your First {FREE_TIER_LEAD_LIMIT} Leads Free
+                  Try SortLeads free
                   <ArrowRight className="h-4 w-4" />
                 </Link>
               </Button>
@@ -654,13 +723,21 @@ export default function Home() {
         <div className="container mx-auto px-4">
           <div className="flex flex-col items-center justify-between gap-4 sm:flex-row">
             <p className="text-sm text-muted-foreground">
-              SortLeads.io - AI-Powered Lead Prioritization
+              SortLeads.io — AI-Powered Lead Prioritization
             </p>
             <div className="flex items-center gap-4">
-              <Link href="/privacy" className="text-sm text-muted-foreground transition-colors hover:text-foreground" data-testid="link-privacy">
+              <Link
+                href="/privacy"
+                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                data-testid="link-privacy"
+              >
                 Privacy Policy
               </Link>
-              <Link href="/terms" className="text-sm text-muted-foreground transition-colors hover:text-foreground" data-testid="link-terms">
+              <Link
+                href="/terms"
+                className="text-sm text-muted-foreground transition-colors hover:text-foreground"
+                data-testid="link-terms"
+              >
                 Terms of Service
               </Link>
             </div>
@@ -675,23 +752,25 @@ export default function Home() {
             <CardContent className="p-6">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-xl font-semibold">Try the Demo</h2>
-                <Button 
-                  size="icon" 
-                  variant="ghost" 
+                <Button
+                  size="icon"
+                  variant="ghost"
                   onClick={() => setShowDemoModal(false)}
                   data-testid="button-close-demo"
                 >
                   <X className="h-4 w-4" />
                 </Button>
               </div>
-              
+
               <p className="mb-4 text-sm text-muted-foreground">
-                We'll analyze 50 sample B2B leads based on your criteria. 
-                View results on screen and download your prioritized CSV.
+                We'll analyze 50 sample B2B leads based on your criteria. View results on screen and
+                download your prioritized CSV.
               </p>
 
               <div className="mb-4 rounded-lg border bg-muted/50 p-3">
-                <p className="mb-2 text-xs font-medium text-muted-foreground">50 SAMPLE LEADS ACROSS INDUSTRIES:</p>
+                <p className="mb-2 text-xs font-medium text-muted-foreground">
+                  50 SAMPLE LEADS ACROSS INDUSTRIES:
+                </p>
                 <ul className="space-y-1 text-xs text-muted-foreground">
                   <li>C-suite & VPs at manufacturing, tech, and finance companies</li>
                   <li>Directors & managers across healthcare, logistics, and retail</li>
