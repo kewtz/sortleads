@@ -297,7 +297,8 @@ async function processJob(jobId: string) {
     errorCount += batchErrors;
     await storage.updateJobProgress(jobId, processedCount);
 
-    // Send single batch completion event with summary
+    // Send batch completion event with ALL results so the frontend can render
+    // a live-growing results table (not just a 3-lead preview).
     notifyJobListeners(jobId, {
       type: "batch_complete",
       batchNumber,
@@ -305,7 +306,7 @@ async function processJob(jobId: string) {
       processed: processedCount,
       total: job.totalLeads,
       errors: errorCount,
-      batchResults: batchResults.slice(0, 3) // Send top 3 results as preview
+      batchResults
     });
   }
 

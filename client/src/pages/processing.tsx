@@ -1,16 +1,28 @@
-import { useEffect, useState } from "react";
-import { useParams, useLocation } from "wouter";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useParams, useLocation, Link } from "wouter";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
 import { Badge } from "@/components/ui/badge";
-import { 
-  Loader2, 
-  CheckCircle2, 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Loader2,
+  CheckCircle2,
   XCircle,
-  Zap,
   Users,
   FileSpreadsheet,
-  Layers
+  Layers,
+  Flame,
+  ThermometerSun,
+  Snowflake,
+  Download,
 } from "lucide-react";
 import type { Job, ProcessedLead } from "@/lib/types";
 import { trackProcessingStarted, trackProcessingCompleted } from "@/lib/analytics";
@@ -27,125 +39,136 @@ interface ProcessingEvent {
   error?: string;
 }
 
+const priorityOrder = (label: string) =>
+  label === "Hot" ? 0 : label === "Warm" ? 1 : label === "Cold" ? 2 : 3;
+
 export default function ProcessingPage() {
   const params = useParams<{ id: string }>();
   const [, setLocation] = useLocation();
-  
+
   const [job, setJob] = useState<Job | null>(null);
-  const [recentLeads, setRecentLeads] = useState<ProcessedLead[]>([]);
+  const [allResults, setAllResults] = useState<ProcessedLead[]>([]);
   const [processedCount, setProcessedCount] = useState(0);
   const [errorCount, setErrorCount] = useState(0);
   const [isConnected, setIsConnected] = useState(false);
   const [currentBatch, setCurrentBatch] = useState(0);
   const [totalBatches, setTotalBatches] = useState(0);
+  const redirectedRef = useRef(false);
+
+  // Merge new results into allResults, dedup by lead.id
+  const mergeResults = (incoming: ProcessedLead[]) => {
+    setAllResults(prev => {
+      const byId = new Map(prev.map(r => [r.id, r]));
+      for (const r of incoming) {
+        byId.set(r.id, r);
+      }
+      return Array.from(byId.values());
+    });
+  };
 
   useEffect(() => {
-    // Save job ID to localStorage for page refresh recovery
     if (params.id) {
-      localStorage.setItem('sortleads_active_job', params.id);
+      localStorage.setItem("sortleads_active_job", params.id);
     }
 
-    // Fetch initial job data and start processing if just paid
     const fetchJob = async () => {
       try {
         const response = await fetch(`/api/jobs/${params.id}`);
-        if (response.ok) {
-          const data = await response.json();
-          setJob(data);
-          
-          // If already completed, redirect to results
-          if (data.status === 'completed') {
-            localStorage.removeItem('sortleads_active_job');
-            setLocation(`/results/${params.id}`);
-            return;
-          }
-          
-          // If job is pending and we just came from payment, start processing
-          const urlParams = new URLSearchParams(window.location.search);
-          if (data.status === 'pending' && urlParams.get('paid') === 'true') {
-            // Clear the URL param
-            window.history.replaceState({}, '', `/processing/${params.id}`);
-            
-            // Start processing
-            await fetch(`/api/jobs/${params.id}/start`, {
-              method: 'POST',
-            });
-          }
-          
-          // Restore progress if resuming
-          if (data.processedLeads > 0) {
-            setProcessedCount(data.processedLeads);
-          }
+        if (!response.ok) return;
+        const data = await response.json();
+        setJob(data);
+
+        // Hydrate allResults from whatever's scored so far (handles page refresh mid-job)
+        if (Array.isArray(data.results) && data.results.length > 0) {
+          mergeResults(data.results);
+        }
+
+        if (typeof data.processedLeads === "number") {
+          setProcessedCount(data.processedLeads);
+        }
+
+        if (data.status === "completed" && !redirectedRef.current) {
+          redirectedRef.current = true;
+          localStorage.removeItem("sortleads_active_job");
+          setLocation(`/results/${params.id}`);
+          return;
+        }
+
+        // If pending and arrived from checkout, kick off processing
+        const urlParams = new URLSearchParams(window.location.search);
+        if (data.status === "pending" && urlParams.get("paid") === "true") {
+          window.history.replaceState({}, "", `/processing/${params.id}`);
+          await fetch(`/api/jobs/${params.id}/start`, { method: "POST" });
         }
       } catch (error) {
-        console.error('Failed to fetch job:', error);
+        console.error("Failed to fetch job:", error);
       }
     };
 
     fetchJob();
 
-    // Set up SSE for real-time updates
     const eventSource = new EventSource(`/api/jobs/${params.id}/stream`);
-    
-    eventSource.onopen = () => {
-      setIsConnected(true);
-    };
+
+    eventSource.onopen = () => setIsConnected(true);
 
     eventSource.onmessage = (event) => {
       try {
         const data: ProcessingEvent = JSON.parse(event.data);
-        
+
         switch (data.type) {
-          case 'started':
+          case "started":
             if (data.total) {
-              setJob(prev => prev ? { ...prev, totalLeads: data.total! } : null);
+              setJob(prev => (prev ? { ...prev, totalLeads: data.total! } : null));
               trackProcessingStarted(params.id!, data.total);
             }
             break;
-            
-          case 'batch_start':
+
+          case "batch_start":
             if (data.batchNumber && data.totalBatches) {
               setCurrentBatch(data.batchNumber);
               setTotalBatches(data.totalBatches);
             }
             break;
-            
-          case 'batch_complete':
-            if (data.processed !== undefined) {
-              setProcessedCount(data.processed);
-            }
-            if (data.errors !== undefined) {
-              setErrorCount(data.errors);
-            }
+
+          case "batch_complete":
+            if (typeof data.processed === "number") setProcessedCount(data.processed);
+            if (typeof data.errors === "number") setErrorCount(data.errors);
             if (data.batchNumber && data.totalBatches) {
               setCurrentBatch(data.batchNumber);
               setTotalBatches(data.totalBatches);
             }
-            // Add batch results to recent leads (keep last 5)
             if (data.batchResults && data.batchResults.length > 0) {
-              setRecentLeads(prev => [...data.batchResults!, ...prev].slice(0, 5));
+              mergeResults(data.batchResults);
             }
             break;
-            
-          case 'complete':
-            setJob(prev => prev ? { ...prev, status: 'completed' } : null);
+
+          case "complete":
+            setJob(prev => (prev ? { ...prev, status: "completed" } : null));
             setProcessedCount(prev => {
-              trackProcessingCompleted(params.id!, data.processed || prev, 0, 0, 0);
-              return data.processed || prev;
+              const finalCount = data.processed ?? prev;
+              trackProcessingCompleted(params.id!, finalCount, 0, 0, 0);
+              return finalCount;
             });
-            localStorage.removeItem('sortleads_active_job');
+            localStorage.removeItem("sortleads_active_job");
+            // Short pause so the user sees the "complete" state before being
+            // taken to the full results page with bulk actions + download.
             setTimeout(() => {
-              setLocation(`/results/${params.id}`);
-            }, 1500);
+              if (!redirectedRef.current) {
+                redirectedRef.current = true;
+                setLocation(`/results/${params.id}`);
+              }
+            }, 2500);
             break;
-            
-          case 'error':
-            setJob(prev => prev ? { ...prev, status: 'failed', error: data.error } : null);
-            localStorage.removeItem('sortleads_active_job');
+
+          case "error":
+            setJob(prev =>
+              prev ? { ...prev, status: "failed", error: data.error } : null,
+            );
+            localStorage.removeItem("sortleads_active_job");
             break;
         }
       } catch (e) {
-        console.error('Failed to parse SSE event:', e);
+        console.error("Failed to parse SSE event:", e);
       }
     };
 
@@ -160,25 +183,54 @@ export default function ProcessingPage() {
   }, [params.id, setLocation]);
 
   const progress = job?.totalLeads ? (processedCount / job.totalLeads) * 100 : 0;
-  const isComplete = job?.status === 'completed';
-  const isFailed = job?.status === 'failed';
+  const isComplete = job?.status === "completed";
+  const isFailed = job?.status === "failed";
+
+  // Live-sorted view: Hot > Warm > Cold, then descending priority score.
+  // Also computed live counts from the actual results we've seen so far.
+  const { sortedResults, hotCount, warmCount, coldCount } = useMemo(() => {
+    const sorted = [...allResults].sort((a, b) => {
+      const po = priorityOrder(a.priorityLabel) - priorityOrder(b.priorityLabel);
+      if (po !== 0) return po;
+      return (b.priority ?? 0) - (a.priority ?? 0);
+    });
+    return {
+      sortedResults: sorted,
+      hotCount: sorted.filter(r => r.priorityLabel === "Hot").length,
+      warmCount: sorted.filter(r => r.priorityLabel === "Warm").length,
+      coldCount: sorted.filter(r => r.priorityLabel === "Cold").length,
+    };
+  }, [allResults]);
 
   const getPriorityBadgeClass = (priority: string) => {
     switch (priority) {
-      case 'Hot':
-        return 'bg-red-500 dark:bg-red-600 text-white';
-      case 'Warm':
-        return 'bg-amber-500 dark:bg-amber-600 text-white';
-      case 'Cold':
-        return 'bg-slate-400 dark:bg-slate-500 text-white';
+      case "Hot":
+        return "bg-red-500 dark:bg-red-600 text-white";
+      case "Warm":
+        return "bg-amber-500 dark:bg-amber-600 text-white";
+      case "Cold":
+        return "bg-slate-400 dark:bg-slate-500 text-white";
       default:
-        return '';
+        return "";
+    }
+  };
+
+  const getPriorityIcon = (priority: string) => {
+    switch (priority) {
+      case "Hot":
+        return <Flame className="h-3.5 w-3.5" />;
+      case "Warm":
+        return <ThermometerSun className="h-3.5 w-3.5" />;
+      case "Cold":
+        return <Snowflake className="h-3.5 w-3.5" />;
+      default:
+        return null;
     }
   };
 
   return (
     <div className="container mx-auto px-4 py-12">
-      <div className="mx-auto max-w-2xl">
+      <div className="mx-auto max-w-5xl">
         <div className="mb-8 text-center">
           <div className="mb-4 inline-flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
             {isComplete ? (
@@ -189,22 +241,20 @@ export default function ProcessingPage() {
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
             )}
           </div>
-          
+
           <h1 className="mb-3 text-3xl font-bold tracking-tight">
-            {isComplete 
-              ? "Processing Complete!" 
-              : isFailed 
-                ? "Processing Failed" 
-                : "Analyzing Your Leads"
-            }
+            {isComplete
+              ? "Processing Complete!"
+              : isFailed
+                ? "Processing Failed"
+                : "Analyzing Your Leads"}
           </h1>
           <p className="text-muted-foreground">
-            {isComplete 
-              ? "Redirecting to your results..." 
-              : isFailed 
-                ? job?.error || "Something went wrong. Please try again." 
-                : "AI is reviewing leads in batches for faster processing."
-            }
+            {isComplete
+              ? "Taking you to your full results..."
+              : isFailed
+                ? job?.error || "Something went wrong. Please try again."
+                : "Results appear below as each lead is scored. Hot leads show up first."}
           </p>
         </div>
 
@@ -242,66 +292,97 @@ export default function ProcessingPage() {
 
             {errorCount > 0 && (
               <p className="text-sm text-muted-foreground">
-                {errorCount} lead{errorCount !== 1 ? 's' : ''} couldn't be analyzed
+                {errorCount} lead{errorCount !== 1 ? "s" : ""} couldn't be analyzed
+                (see table below for details)
               </p>
             )}
 
-            {/* Stats */}
-            <div className="grid grid-cols-3 gap-4 pt-4">
-              <div className="text-center">
-                <div className="text-2xl font-bold text-primary" data-testid="stat-total">
-                  {job?.totalLeads || 0}
+            <div className="grid grid-cols-3 gap-4 pt-2">
+              <div className="flex items-center gap-3 rounded-lg border p-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-red-500/10">
+                  <Flame className="h-4 w-4 text-red-500" />
                 </div>
-                <div className="text-xs text-muted-foreground">Total Leads</div>
+                <div>
+                  <p className="text-xl font-bold leading-none" data-testid="count-hot">
+                    {hotCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Hot</p>
+                </div>
               </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-green-500 dark:text-green-400" data-testid="stat-processed">
-                  {processedCount}
+              <div className="flex items-center gap-3 rounded-lg border p-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-amber-500/10">
+                  <ThermometerSun className="h-4 w-4 text-amber-500" />
                 </div>
-                <div className="text-xs text-muted-foreground">Processed</div>
+                <div>
+                  <p className="text-xl font-bold leading-none" data-testid="count-warm">
+                    {warmCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Warm</p>
+                </div>
               </div>
-              <div className="text-center">
-                <div className="text-2xl font-bold text-muted-foreground" data-testid="stat-remaining">
-                  {Math.max(0, (job?.totalLeads || 0) - processedCount)}
+              <div className="flex items-center gap-3 rounded-lg border p-3">
+                <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-500/10">
+                  <Snowflake className="h-4 w-4 text-slate-500" />
                 </div>
-                <div className="text-xs text-muted-foreground">Remaining</div>
+                <div>
+                  <p className="text-xl font-bold leading-none" data-testid="count-cold">
+                    {coldCount}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Cold</p>
+                </div>
               </div>
             </div>
           </CardContent>
         </Card>
 
-        {/* Recent Leads from Latest Batch */}
-        {recentLeads.length > 0 && !isComplete && (
+        {/* Live Results Table */}
+        {sortedResults.length > 0 && (
           <Card className="mb-6">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Zap className="h-4 w-4 text-primary" />
-                Recently Analyzed
+            <CardHeader className="flex flex-row items-center justify-between">
+              <CardTitle className="text-base">
+                Scored so far ({sortedResults.length})
               </CardTitle>
+              {isComplete && (
+                <Button asChild size="sm" className="gap-2">
+                  <Link href={`/results/${params.id}`}>
+                    <Download className="h-4 w-4" />
+                    Open full results
+                  </Link>
+                </Button>
+              )}
             </CardHeader>
-            <CardContent className="space-y-3">
-              {recentLeads.slice(0, 3).map((lead, index) => (
-                <div 
-                  key={lead.id || index} 
-                  className="flex items-start justify-between gap-4 rounded-lg border p-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-medium" data-testid={`text-recent-lead-name-${index}`}>
-                      {lead.name || 'Unknown'}
-                    </p>
-                    <p className="truncate text-sm text-muted-foreground">
-                      {lead.title && `${lead.title} at `}
-                      {lead.company || 'Unknown Company'}
-                    </p>
-                  </div>
-                  <Badge 
-                    className={getPriorityBadgeClass(lead.priorityLabel)}
-                    data-testid={`badge-priority-${index}`}
-                  >
-                    {lead.priorityLabel}
-                  </Badge>
-                </div>
-              ))}
+            <CardContent>
+              <div className="max-h-[480px] overflow-auto rounded-md border">
+                <Table>
+                  <TableHeader className="sticky top-0 bg-background">
+                    <TableRow>
+                      <TableHead>Name</TableHead>
+                      <TableHead>Company</TableHead>
+                      <TableHead className="hidden md:table-cell">Title</TableHead>
+                      <TableHead className="w-[110px]">Priority</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {sortedResults.map((lead) => (
+                      <TableRow key={lead.id} data-testid={`row-live-${lead.id}`}>
+                        <TableCell className="font-medium">{lead.name || "-"}</TableCell>
+                        <TableCell>{lead.company || "-"}</TableCell>
+                        <TableCell className="hidden md:table-cell">
+                          {lead.title || "-"}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={`gap-1 ${getPriorityBadgeClass(lead.priorityLabel)}`}
+                          >
+                            {getPriorityIcon(lead.priorityLabel)}
+                            {lead.priorityLabel}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </CardContent>
           </Card>
         )}
@@ -314,7 +395,9 @@ export default function ProcessingPage() {
                 <FileSpreadsheet className="h-5 w-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="font-medium" data-testid="text-job-filename">{job.fileName}</p>
+                <p className="font-medium" data-testid="text-job-filename">
+                  {job.fileName}
+                </p>
                 <p className="text-sm text-muted-foreground">
                   Uploaded {new Date(job.createdAt).toLocaleString()}
                 </p>
@@ -323,11 +406,10 @@ export default function ProcessingPage() {
           </Card>
         )}
 
-        {/* Tip for large lists */}
         {(job?.totalLeads || 0) > 100 && !isComplete && !isFailed && (
           <p className="mt-6 text-center text-sm text-muted-foreground">
-            Processing large lists can take a few minutes. Feel free to leave this page - 
-            we'll email you when your results are ready.
+            Large lists take a few minutes. Feel free to leave this page — your
+            scored leads are saved as they come in.
           </p>
         )}
       </div>
