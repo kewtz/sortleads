@@ -26,23 +26,36 @@ const anthropic = new Anthropic({
 // p-retry handles the 429/529 backoff when we exceed the burst allowance.
 const anthropicLimit = pLimit(3);
 
-// Helper to extract JSON from Claude response (handles extra text around JSON)
+// Extract JSON (object or array) from a Claude response. Handles:
+// - Raw JSON (object or array) as the entire response
+// - Markdown-wrapped JSON: ```json\n...\n``` or ```\n...\n```
+// - Responses with leading/trailing prose around the JSON block
 function extractJSON(text: string): object | null {
-  // Try direct parse first
+  // Strip markdown code fences if present (Claude sometimes wraps even when told not to)
+  let cleaned = text.trim().replace(/^```(?:json)?\s*\n?/i, "").replace(/\n?\s*```\s*$/, "").trim();
+
+  // Try direct parse first (cheapest path)
   try {
-    return JSON.parse(text);
-  } catch {
-    // Try to find JSON object in the text
-    const jsonMatch = text.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      try {
-        return JSON.parse(jsonMatch[0]);
-      } catch {
-        return null;
-      }
-    }
-    return null;
+    return JSON.parse(cleaned);
+  } catch {}
+
+  // Try to extract a top-level JSON array first (the batch endpoint expects one)
+  const arrayMatch = cleaned.match(/\[[\s\S]*\]/);
+  if (arrayMatch) {
+    try {
+      return JSON.parse(arrayMatch[0]);
+    } catch {}
   }
+
+  // Fall back to extracting a JSON object (used by /enhance-prompt)
+  const objectMatch = cleaned.match(/\{[\s\S]*\}/);
+  if (objectMatch) {
+    try {
+      return JSON.parse(objectMatch[0]);
+    } catch {}
+  }
+
+  return null;
 }
 
 // Store active SSE connections for each job
