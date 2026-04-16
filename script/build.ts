@@ -60,9 +60,16 @@ async function buildAll() {
     minify: true,
     external: externals,
     logLevel: "info",
-    // ESM output needs this banner for node's require() to work inside bundled CJS deps
+    // ESM output needs shims for CJS-style globals used by bundled code
     banner: {
-      js: "import { createRequire } from 'module'; const require = createRequire(import.meta.url);",
+      js: [
+        "import { createRequire } from 'module';",
+        "import { fileURLToPath } from 'url';",
+        "import { dirname as __pathDirname } from 'path';",
+        "const require = createRequire(import.meta.url);",
+        "const __filename = fileURLToPath(import.meta.url);",
+        "const __dirname = __pathDirname(__filename);",
+      ].join(""),
     },
   });
 }
