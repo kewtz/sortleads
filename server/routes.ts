@@ -587,7 +587,9 @@ export async function registerRoutes(
     res.json({ available: storage.canUseDemo(clientIp) });
   });
   
-  // Check free tier status — uses auth user_id if signed in, else email
+  // Check free tier status. Authenticated users are tracked by user_id (so
+  // they get a fresh 50-lead allowance even if their email was used before
+  // auth existed). Unauthenticated users fall back to email-based lookup.
   app.post('/api/free-tier/check', optionalAuth, async (req: Request, res: Response) => {
     try {
       const email = req.user?.email ?? req.body.email;
@@ -612,8 +614,22 @@ export async function registerRoutes(
             subscribed: true,
           });
         }
+
+        // Authenticated free user: track by user_id for a clean slate
+        const usage = await storage.getFreeTierUsageByUserId(req.user.id);
+        const freeLeadsUsed = usage?.freeLeadsUsed || 0;
+        const freeLeadsRemaining = Math.max(FREE_TIER_LEAD_LIMIT - freeLeadsUsed, 0);
+
+        return res.json({
+          email: email.trim().toLowerCase(),
+          freeLeadsUsed,
+          freeLeadsRemaining,
+          freeLeadLimit: FREE_TIER_LEAD_LIMIT,
+          subscribed: false,
+        });
       }
 
+      // Unauthenticated: email-based lookup
       const user = await storage.getFreeTierUser(email.trim());
       const freeLeadsUsed = user?.freeLeadsUsed || 0;
       const freeLeadsRemaining = Math.max(FREE_TIER_LEAD_LIMIT - freeLeadsUsed, 0);
@@ -672,8 +688,15 @@ export async function registerRoutes(
       if (isSubscriber) {
         freeLeadsApplied = leads.length;
         billableLeads = 0;
+      } else if (req.user) {
+        // Authenticated free user: reserve by user_id (not email)
+        const reserved = await storage.reserveFreeTierLeadsByUserId(
+          req.user.id, email, leads.length, FREE_TIER_LEAD_LIMIT
+        );
+        freeLeadsApplied = reserved.freeLeadsApplied;
+        billableLeads = reserved.billableLeads;
       } else {
-        // Atomically reserve free tier leads (prevents race conditions)
+        // Unauthenticated: original email-based reservation
         const reserved = await storage.reserveFreeTierLeads(
           email, leads.length, FREE_TIER_LEAD_LIMIT
         );

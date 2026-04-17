@@ -5,6 +5,8 @@ import pg from "pg";
 export interface IStorage {
   createJob(fileName: string, prompt: string, leads: Lead[], isDemo?: boolean, email?: string, freeLeadsApplied?: number, userId?: string): Promise<Job>;
   hasActiveSubscription(userId: string): Promise<boolean>;
+  getFreeTierUsageByUserId(userId: string): Promise<{ freeLeadsUsed: number } | null>;
+  reserveFreeTierLeadsByUserId(userId: string, email: string, requestedLeads: number, limit: number): Promise<{ freeLeadsApplied: number; billableLeads: number }>;
   getJob(id: string): Promise<Job | undefined>;
   updateJob(id: string, updates: Partial<Job>): Promise<void>;
   updateJobStatus(id: string, status: Job["status"], error?: string): Promise<void>;
@@ -155,10 +157,79 @@ export class DbStorage implements IStorage {
   async hasActiveSubscription(userId: string): Promise<boolean> {
     const pool = this.getPool();
     const result = await pool.query(
-      `SELECT 1 FROM checkout_sessions WHERE user_id = $1 AND payment_status = 'complete' LIMIT 1`,
+      `SELECT 1 FROM checkout_sessions WHERE user_id = $1 AND payment_status IN ('paid', 'complete', 'no_payment_required') LIMIT 1`,
       [userId],
     );
     return result.rows.length > 0;
+  }
+
+  async getFreeTierUsageByUserId(userId: string): Promise<{ freeLeadsUsed: number } | null> {
+    const pool = this.getPool();
+    const result = await pool.query(
+      "SELECT free_leads_used FROM free_tier_users WHERE user_id = $1",
+      [userId],
+    );
+    if (result.rows.length === 0) return null;
+    return { freeLeadsUsed: result.rows[0].free_leads_used };
+  }
+
+  async reserveFreeTierLeadsByUserId(
+    userId: string,
+    email: string,
+    requestedLeads: number,
+    limit: number,
+  ): Promise<{ freeLeadsApplied: number; billableLeads: number }> {
+    const pool = this.getPool();
+    const normalizedEmail = email.toLowerCase().trim();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      // Upsert by user_id. If this user_id has no row yet, they get a fresh
+      // allowance (0 used) even if their email was consumed under old
+      // email-only tracking.
+      const result = await client.query(
+        `INSERT INTO free_tier_users (email, user_id, free_leads_used, last_used_at)
+         VALUES ($1, $2, 0, NOW())
+         ON CONFLICT (email) DO UPDATE SET user_id = COALESCE(free_tier_users.user_id, $2), last_used_at = NOW()
+         RETURNING free_leads_used`,
+        [normalizedEmail, userId],
+      );
+
+      // Check if this user_id has an existing row (may differ from email row)
+      const byUserId = await client.query(
+        "SELECT free_leads_used FROM free_tier_users WHERE user_id = $1",
+        [userId],
+      );
+      const currentUsed = byUserId.rows.length > 0 ? byUserId.rows[0].free_leads_used : 0;
+
+      const remaining = Math.max(limit - currentUsed, 0);
+      const freeLeadsApplied = Math.min(requestedLeads, remaining);
+      const billableLeads = requestedLeads - freeLeadsApplied;
+
+      if (freeLeadsApplied > 0 && byUserId.rows.length > 0) {
+        await client.query(
+          "UPDATE free_tier_users SET free_leads_used = free_leads_used + $1, last_used_at = NOW() WHERE user_id = $2",
+          [freeLeadsApplied, userId],
+        );
+      } else if (freeLeadsApplied > 0 && byUserId.rows.length === 0) {
+        // First time this user_id uploads — create a row for them
+        await client.query(
+          `INSERT INTO free_tier_users (email, user_id, free_leads_used, last_used_at)
+           VALUES ($1, $2, $3, NOW())
+           ON CONFLICT (email) DO UPDATE SET user_id = $2, free_leads_used = $3, last_used_at = NOW()`,
+          [normalizedEmail, userId, freeLeadsApplied],
+        );
+      }
+
+      await client.query("COMMIT");
+      return { freeLeadsApplied, billableLeads };
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   }
 
   async getJob(id: string): Promise<Job | undefined> {

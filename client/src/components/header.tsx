@@ -54,9 +54,14 @@ export function Header() {
             <Link href="/about">About</Link>
           </Button>
           {user ? (
-            <Button variant="default" size="sm" asChild data-testid="link-start">
-              <Link href="/upload">Sort My Leads</Link>
-            </Button>
+            <>
+              <span className="hidden text-xs text-muted-foreground sm:inline" data-testid="text-header-email">
+                {user.email}
+              </span>
+              <Button variant="default" size="sm" asChild data-testid="link-start">
+                <Link href="/upload">Sort My Leads</Link>
+              </Button>
+            </>
           ) : (
             <Button variant="default" size="sm" asChild data-testid="link-sign-in">
               <Link href="/auth">Sign in</Link>

@@ -441,7 +441,11 @@ export default function UploadPage() {
                       <div>
                         <p className="font-semibold">Subscription required</p>
                         <p className="text-sm text-muted-foreground">
-                          {totalLeads} leads exceeds the {FREE_TIER_LEAD_LIMIT}-lead free tier.
+                          Your list has {totalLeads} leads but you have{" "}
+                          {freeLeadsRemaining === 0
+                            ? "no"
+                            : freeLeadsRemaining}{" "}
+                          free leads remaining (of {FREE_TIER_LEAD_LIMIT} total).
                         </p>
                       </div>
                     </div>
