@@ -20,6 +20,7 @@ const allowlist = [
   "multer",
   "nanoid",
   "nodemailer",
+  "@supabase/supabase-js",
   "openai",
   "p-limit",
   "p-retry",
