@@ -55,6 +55,9 @@ export function Header() {
           </Button>
           {user ? (
             <>
+              <Button variant="ghost" size="sm" asChild data-testid="nav-history">
+                <Link href="/history">My Uploads</Link>
+              </Button>
               <span className="hidden text-xs text-muted-foreground sm:inline" data-testid="text-header-email">
                 {user.email}
               </span>

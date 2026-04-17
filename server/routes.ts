@@ -753,6 +753,17 @@ export async function registerRoutes(
     }
   });
 
+  // List jobs for the authenticated user (most recent first, metadata only)
+  app.get('/api/jobs', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const jobs = await storage.getJobsByUserId(req.user!.id);
+      res.json(jobs);
+    } catch (error) {
+      console.error('Error listing jobs:', error);
+      res.status(500).json({ error: 'Failed to list jobs' });
+    }
+  });
+
   // Get job status and results
   app.get('/api/jobs/:id', async (req: Request, res: Response) => {
     try {

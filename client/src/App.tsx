@@ -15,6 +15,7 @@ import Terms from "@/pages/terms";
 import About from "@/pages/about";
 import Auth from "@/pages/auth";
 import AuthCallback from "@/pages/auth-callback";
+import History from "@/pages/history";
 import NotFound from "@/pages/not-found";
 
 /** Redirect to /auth if not signed in */
@@ -45,6 +46,11 @@ function Router() {
       <Route path="/privacy" component={Privacy} />
       <Route path="/terms" component={Terms} />
       <Route path="/about" component={About} />
+      <Route path="/history">
+        <RequireAuth>
+          <History />
+        </RequireAuth>
+      </Route>
       <Route path="/auth" component={Auth} />
       <Route path="/auth/callback" component={AuthCallback} />
       <Route component={NotFound} />

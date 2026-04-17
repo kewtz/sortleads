@@ -8,6 +8,7 @@ export interface IStorage {
   getFreeTierUsageByUserId(userId: string): Promise<{ freeLeadsUsed: number } | null>;
   reserveFreeTierLeadsByUserId(userId: string, email: string, requestedLeads: number, limit: number): Promise<{ freeLeadsApplied: number; billableLeads: number }>;
   getJob(id: string): Promise<Job | undefined>;
+  getJobsByUserId(userId: string): Promise<Job[]>;
   updateJob(id: string, updates: Partial<Job>): Promise<void>;
   updateJobStatus(id: string, status: Job["status"], error?: string): Promise<void>;
   updateJobProgress(id: string, processedLeads: number): Promise<void>;
@@ -242,6 +243,22 @@ export class DbStorage implements IStorage {
     const result = await pool.query<JobDbRow>("SELECT * FROM jobs WHERE id = $1", [id]);
     if (result.rows.length === 0) return undefined;
     return rowToJob(result.rows[0]);
+  }
+
+  async getJobsByUserId(userId: string): Promise<Job[]> {
+    const pool = this.getPool();
+    // Return metadata only (omit leads/results blobs for performance).
+    // The full data is fetched per-job via getJob when the user clicks in.
+    const result = await pool.query<JobDbRow>(
+      `SELECT id, status, total_leads, processed_leads, prompt, file_name,
+              '[]'::jsonb AS leads, '[]'::jsonb AS results,
+              error, is_demo, stripe_session_id, paid_amount_cents,
+              user_id, email, free_leads_applied, created_at, updated_at
+       FROM jobs WHERE user_id = $1 AND is_demo = false
+       ORDER BY created_at DESC LIMIT 50`,
+      [userId],
+    );
+    return result.rows.map(rowToJob);
   }
 
   async updateJob(id: string, updates: Partial<Job>): Promise<void> {

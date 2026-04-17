@@ -298,6 +298,22 @@ export default function ResultsPage() {
   return (
     <div className="container mx-auto px-4 py-12">
       <div className="mx-auto max-w-6xl">
+        {/* Download reminder banner */}
+        <div className="mb-6 flex items-center justify-between gap-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
+          <div className="flex items-center gap-3">
+            <Download className="h-5 w-5 shrink-0 text-primary" />
+            <p className="text-sm">
+              <strong>Download your results</strong> — this is your scored and ranked lead list.
+              You can always find it later under{" "}
+              <Link href="/history" className="text-primary hover:underline">My Uploads</Link>.
+            </p>
+          </div>
+          <Button size="sm" onClick={handleDownload} disabled={isDownloading} className="shrink-0 gap-2">
+            <Download className="h-3.5 w-3.5" />
+            {isDownloading ? "..." : "Download CSV"}
+          </Button>
+        </div>
+
         {/* Header */}
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
