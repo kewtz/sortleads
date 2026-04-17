@@ -23,6 +23,9 @@ import {
   ThermometerSun,
   Snowflake,
   Download,
+  Clock,
+  Bell,
+  ExternalLink,
 } from "lucide-react";
 import type { Job, ProcessedLead } from "@/lib/types";
 import { trackProcessingStarted, trackProcessingCompleted } from "@/lib/analytics";
@@ -54,6 +57,42 @@ export default function ProcessingPage() {
   const [currentBatch, setCurrentBatch] = useState(0);
   const [totalBatches, setTotalBatches] = useState(0);
   const redirectedRef = useRef(false);
+  const startTimeRef = useRef<number>(Date.now());
+  const [notifyEnabled, setNotifyEnabled] = useState(false);
+
+  // Time estimation: based on observed rate of leads/second so far
+  const estimatedSecondsRemaining = useMemo(() => {
+    if (processedCount === 0 || !job?.totalLeads) return null;
+    const elapsed = (Date.now() - startTimeRef.current) / 1000;
+    const rate = processedCount / elapsed; // leads per second
+    const remaining = job.totalLeads - processedCount;
+    return Math.ceil(remaining / rate);
+  }, [processedCount, job?.totalLeads]);
+
+  const formatTimeRemaining = (seconds: number | null) => {
+    if (seconds === null) return null;
+    if (seconds < 60) return "less than a minute";
+    const mins = Math.ceil(seconds / 60);
+    return `about ${mins} minute${mins !== 1 ? "s" : ""}`;
+  };
+
+  // Request browser notification permission
+  const requestNotifications = async () => {
+    if (!("Notification" in window)) return;
+    const perm = await Notification.requestPermission();
+    setNotifyEnabled(perm === "granted");
+  };
+
+  // Send browser notification when complete
+  const sendCompletionNotification = () => {
+    if (!notifyEnabled || !("Notification" in window)) return;
+    try {
+      new Notification("SortLeads — Your leads are ready", {
+        body: `${job?.totalLeads || 0} leads scored and ranked. Click to view results.`,
+        icon: "/favicon.png",
+      });
+    } catch {}
+  };
 
   // Merge new results into allResults, dedup by lead.id
   const mergeResults = (incoming: ProcessedLead[]) => {
@@ -119,6 +158,7 @@ export default function ProcessingPage() {
           case "started":
             if (data.total) {
               setJob(prev => (prev ? { ...prev, totalLeads: data.total! } : null));
+              startTimeRef.current = Date.now();
               trackProcessingStarted(params.id!, data.total);
             }
             break;
@@ -150,8 +190,7 @@ export default function ProcessingPage() {
               return finalCount;
             });
             localStorage.removeItem("sortleads_active_job");
-            // Short pause so the user sees the "complete" state before being
-            // taken to the full results page with bulk actions + download.
+            sendCompletionNotification();
             setTimeout(() => {
               if (!redirectedRef.current) {
                 redirectedRef.current = true;
@@ -256,6 +295,12 @@ export default function ProcessingPage() {
                 ? job?.error || "Something went wrong. Please try again."
                 : "Results appear below as each lead is scored. Hot leads show up first."}
           </p>
+          {!isComplete && !isFailed && estimatedSecondsRemaining !== null && estimatedSecondsRemaining > 10 && (
+            <p className="mt-2 flex items-center justify-center gap-1.5 text-sm text-muted-foreground">
+              <Clock className="h-3.5 w-3.5" />
+              Estimated {formatTimeRemaining(estimatedSecondsRemaining)} remaining
+            </p>
+          )}
         </div>
 
         {/* Progress Card */}
@@ -289,6 +334,41 @@ export default function ProcessingPage() {
               </div>
               <Progress value={progress} className="h-3" data-testid="progress-bar" />
             </div>
+
+            {/* Safe-to-leave + notification opt-in */}
+            {!isComplete && !isFailed && (
+              <div className="rounded-lg border bg-muted/40 p-3">
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                    <ExternalLink className="h-4 w-4 shrink-0" />
+                    <span>
+                      You can close this tab — your results are saved automatically.
+                      Find them anytime in{" "}
+                      <Link href="/history" className="text-primary hover:underline">
+                        My Uploads
+                      </Link>.
+                    </span>
+                  </div>
+                  {"Notification" in window && !notifyEnabled && (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="shrink-0 gap-1.5"
+                      onClick={requestNotifications}
+                    >
+                      <Bell className="h-3.5 w-3.5" />
+                      Notify me when done
+                    </Button>
+                  )}
+                  {notifyEnabled && (
+                    <span className="flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
+                      <CheckCircle2 className="h-3.5 w-3.5" />
+                      We'll notify you
+                    </span>
+                  )}
+                </div>
+              </div>
+            )}
 
             {errorCount > 0 && (
               <p className="text-sm text-muted-foreground">
@@ -406,12 +486,6 @@ export default function ProcessingPage() {
           </Card>
         )}
 
-        {(job?.totalLeads || 0) > 100 && !isComplete && !isFailed && (
-          <p className="mt-6 text-center text-sm text-muted-foreground">
-            Large lists take a few minutes. Feel free to leave this page — your
-            scored leads are saved as they come in.
-          </p>
-        )}
       </div>
     </div>
   );
