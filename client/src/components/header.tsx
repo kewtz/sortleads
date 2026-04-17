@@ -1,12 +1,30 @@
+import { useEffect, useState } from "react";
 import { Link, useLocation } from "wouter";
-import { FileSpreadsheet } from "lucide-react";
+import { FileSpreadsheet, Settings } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/context/AuthContext";
 
 export function Header() {
   const [location] = useLocation();
-  const { user } = useAuth();
+  const { user, session } = useAuth();
+  const [isOrgAdmin, setIsOrgAdmin] = useState(false);
+
+  // Check if the signed-in user is an org admin (lightweight — one fetch on mount)
+  useEffect(() => {
+    if (!user || !session?.access_token) {
+      setIsOrgAdmin(false);
+      return;
+    }
+    fetch("/api/org", {
+      headers: { Authorization: `Bearer ${session.access_token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        setIsOrgAdmin(data?.org?.role === "admin");
+      })
+      .catch(() => setIsOrgAdmin(false));
+  }, [user, session?.access_token]);
 
   const scrollToSection = (id: string) => {
     if (location !== "/") {
@@ -58,6 +76,14 @@ export function Header() {
               <Button variant="ghost" size="sm" asChild data-testid="nav-history">
                 <Link href="/history">My Uploads</Link>
               </Button>
+              {isOrgAdmin && (
+                <Button variant="ghost" size="sm" asChild className="gap-1" data-testid="nav-admin">
+                  <Link href="/admin">
+                    <Settings className="h-3.5 w-3.5" />
+                    Admin
+                  </Link>
+                </Button>
+              )}
               <span className="hidden text-xs text-muted-foreground sm:inline" data-testid="text-header-email">
                 {user.email}
               </span>
