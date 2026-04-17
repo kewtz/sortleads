@@ -12,14 +12,39 @@ import {
   Clock,
   XCircle,
   Upload,
+  Ban,
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
+import { useToast } from "@/hooks/use-toast";
 import type { Job } from "@/lib/types";
 
 export default function HistoryPage() {
   const { session } = useAuth();
+  const { toast } = useToast();
   const [jobs, setJobs] = useState<Job[]>([]);
   const [loading, setLoading] = useState(true);
+  const [cancellingId, setCancellingId] = useState<string | null>(null);
+
+  const cancelJob = async (jobId: string) => {
+    if (!session?.access_token) return;
+    setCancellingId(jobId);
+    try {
+      const res = await fetch(`/api/jobs/${jobId}/cancel`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${session.access_token}` },
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || "Cancel failed");
+      }
+      setJobs((prev) => prev.map((j) => (j.id === jobId ? { ...j, status: "failed" as const, error: "Cancelled by user" } : j)));
+      toast({ title: "Job cancelled" });
+    } catch (error) {
+      toast({ title: "Cancel failed", description: error instanceof Error ? error.message : "Try again", variant: "destructive" });
+    } finally {
+      setCancellingId(null);
+    }
+  };
 
   useEffect(() => {
     if (!session?.access_token) return;
@@ -153,10 +178,28 @@ export default function HistoryPage() {
                         </Button>
                       </div>
                     )}
-                    {job.status === "processing" && (
-                      <Button variant="outline" size="sm" asChild>
-                        <Link href={`/processing/${job.id}`}>View progress</Link>
-                      </Button>
+                    {(job.status === "processing" || job.status === "pending") && (
+                      <div className="flex gap-2">
+                        {job.status === "processing" && (
+                          <Button variant="outline" size="sm" asChild>
+                            <Link href={`/processing/${job.id}`}>View progress</Link>
+                          </Button>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="gap-1 text-destructive hover:text-destructive"
+                          onClick={() => cancelJob(job.id)}
+                          disabled={cancellingId === job.id}
+                        >
+                          {cancellingId === job.id ? (
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Ban className="h-3.5 w-3.5" />
+                          )}
+                          Cancel
+                        </Button>
+                      </div>
                     )}
                   </div>
                 </CardContent>

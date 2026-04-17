@@ -764,6 +764,23 @@ export async function registerRoutes(
     }
   });
 
+  // Cancel a pending or processing job
+  app.post('/api/jobs/:id/cancel', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const job = await storage.getJob(req.params.id);
+      if (!job) return res.status(404).json({ error: 'Job not found' });
+      if (job.userId !== req.user!.id) return res.status(403).json({ error: 'Not your job' });
+      if (job.status !== 'pending' && job.status !== 'processing') {
+        return res.status(400).json({ error: `Cannot cancel a ${job.status} job` });
+      }
+      await storage.updateJobStatus(job.id, 'failed', 'Cancelled by user');
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error cancelling job:', error);
+      res.status(500).json({ error: 'Failed to cancel job' });
+    }
+  });
+
   // Get job status and results
   app.get('/api/jobs/:id', async (req: Request, res: Response) => {
     try {
