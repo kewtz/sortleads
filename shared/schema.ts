@@ -1,4 +1,4 @@
-import { pgTable, serial, text, integer, timestamp, jsonb, boolean } from "drizzle-orm/pg-core";
+import { pgTable, serial, text, integer, timestamp, jsonb, boolean, uuid } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 import { z } from "zod";
 
@@ -46,6 +46,39 @@ export const jobs = pgTable("jobs", {
   freeLeadsApplied: integer("free_leads_applied"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   updatedAt: timestamp("updated_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+// ── Multi-tenant organization tables (Portfolio tier) ──
+
+export const organizations = pgTable("organizations", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  ownerId: text("owner_id").notNull(), // Supabase user_id of the admin
+  stripeSubscriptionId: text("stripe_subscription_id"),
+  tier: text("tier").notNull().default("portfolio"),
+  createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const orgMembers = pgTable("org_members", {
+  id: serial("id").primaryKey(),
+  orgId: uuid("org_id").notNull(),
+  userId: text("user_id").notNull(),
+  email: text("email").notNull(),
+  role: text("role").notNull().default("member"), // 'admin' | 'member'
+  leadsUsed: integer("leads_used").notNull().default(0),
+  status: text("status").notNull().default("active"), // 'active' | 'invited' | 'removed'
+  invitedAt: timestamp("invited_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
+});
+
+export const orgInvites = pgTable("org_invites", {
+  id: uuid("id").primaryKey().default(sql`gen_random_uuid()`),
+  orgId: uuid("org_id").notNull(),
+  email: text("email"),
+  token: text("token").notNull().unique(),
+  createdBy: text("created_by").notNull(), // admin user_id
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt: timestamp("used_at"),
+  usedBy: text("used_by"), // user_id who accepted
 });
 
 export const leadSchema = z.object({

@@ -706,6 +706,14 @@ export async function registerRoutes(
 
       const job = await storage.createJob(file.originalname, prompt, leads, false, email, freeLeadsApplied, req.user?.id);
 
+      // Track org member usage if this user belongs to an org
+      if (req.user) {
+        const org = await storage.getOrgByUserId(req.user.id);
+        if (org) {
+          await storage.incrementMemberLeadsUsed(org.id, req.user.id, leads.length);
+        }
+      }
+
       // If skipPayment (for development/testing), start processing immediately
       if (skipPayment) {
         setImmediate(() => processJob(job.id));
@@ -1049,6 +1057,121 @@ Suggest an improved, more detailed version that would help an AI better prioriti
     } catch (error) {
       console.error('Error enhancing prompt:', error);
       res.status(500).json({ error: 'Failed to enhance prompt' });
+    }
+  });
+
+  // ── Organization routes (Portfolio tier) ─────────────────────────────────
+
+  // Get the authenticated user's organization (if any)
+  app.get('/api/org', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const org = await storage.getOrgByUserId(req.user!.id);
+      if (!org) return res.json({ org: null });
+      res.json({ org });
+    } catch (error) {
+      console.error('Error fetching org:', error);
+      res.status(500).json({ error: 'Failed to fetch organization' });
+    }
+  });
+
+  // List members of the user's org (admin only)
+  app.get('/api/org/members', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const org = await storage.getOrgByUserId(req.user!.id);
+      if (!org) return res.status(404).json({ error: 'No organization found' });
+      if (org.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+      const members = await storage.getOrgMembers(org.id);
+      res.json({ members });
+    } catch (error) {
+      console.error('Error fetching members:', error);
+      res.status(500).json({ error: 'Failed to fetch members' });
+    }
+  });
+
+  // Create an invite link (admin only)
+  app.post('/api/org/invite', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const org = await storage.getOrgByUserId(req.user!.id);
+      if (!org) return res.status(404).json({ error: 'No organization found' });
+      if (org.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+
+      const { email } = req.body;
+      const invite = await storage.createInvite(org.id, req.user!.id, email);
+      res.json({ invite });
+    } catch (error) {
+      console.error('Error creating invite:', error);
+      res.status(500).json({ error: 'Failed to create invite' });
+    }
+  });
+
+  // List pending invites (admin only)
+  app.get('/api/org/invites', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const org = await storage.getOrgByUserId(req.user!.id);
+      if (!org) return res.status(404).json({ error: 'No organization found' });
+      if (org.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+
+      const invites = await storage.getPendingInvites(org.id);
+      res.json({ invites });
+    } catch (error) {
+      console.error('Error fetching invites:', error);
+      res.status(500).json({ error: 'Failed to fetch invites' });
+    }
+  });
+
+  // Revoke an invite (admin only)
+  app.delete('/api/org/invites/:id', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const org = await storage.getOrgByUserId(req.user!.id);
+      if (!org) return res.status(404).json({ error: 'No organization found' });
+      if (org.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+
+      await storage.revokeInvite(req.params.id);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error revoking invite:', error);
+      res.status(500).json({ error: 'Failed to revoke invite' });
+    }
+  });
+
+  // Get invite details (public — used by the invite acceptance page)
+  app.get('/api/org/invite/:token', async (req: Request, res: Response) => {
+    try {
+      const invite = await storage.getInvite(req.params.token);
+      if (!invite) return res.status(404).json({ error: 'Invite not found' });
+      if (invite.usedAt) return res.status(410).json({ error: 'Invite already used' });
+      if (new Date(invite.expiresAt) < new Date()) return res.status(410).json({ error: 'Invite expired' });
+      res.json({ orgName: invite.orgName });
+    } catch (error) {
+      console.error('Error fetching invite:', error);
+      res.status(500).json({ error: 'Failed to fetch invite' });
+    }
+  });
+
+  // Accept an invite (requires auth)
+  app.post('/api/org/invite/:token/accept', requireAuth, async (req: Request, res: Response) => {
+    try {
+      await storage.acceptInvite(req.params.token, req.user!.id, req.user!.email);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error accepting invite:', error);
+      res.status(400).json({ error: error instanceof Error ? error.message : 'Failed to accept invite' });
+    }
+  });
+
+  // Remove a member (admin only, can't remove self)
+  app.delete('/api/org/members/:userId', requireAuth, async (req: Request, res: Response) => {
+    try {
+      const org = await storage.getOrgByUserId(req.user!.id);
+      if (!org) return res.status(404).json({ error: 'No organization found' });
+      if (org.role !== 'admin') return res.status(403).json({ error: 'Admin access required' });
+      if (req.params.userId === req.user!.id) return res.status(400).json({ error: 'Cannot remove yourself' });
+
+      await storage.removeMember(org.id, req.params.userId);
+      res.json({ success: true });
+    } catch (error) {
+      console.error('Error removing member:', error);
+      res.status(500).json({ error: 'Failed to remove member' });
     }
   });
 

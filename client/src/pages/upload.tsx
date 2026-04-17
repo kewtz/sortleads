@@ -18,6 +18,7 @@ import {
   Lock,
   LogOut,
   User,
+  Users,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/context/AuthContext";
@@ -50,6 +51,7 @@ export default function UploadPage() {
   const [isEnhancing, setIsEnhancing] = useState(false);
   const [suggestion, setSuggestion] = useState<string | null>(null);
   const enhanceTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [orgRole, setOrgRole] = useState<string | null>(null);
 
   const isSubscribed = freeTierStatus?.subscribed === true;
   const freeLeadsRemaining = isSubscribed
@@ -74,22 +76,21 @@ export default function UploadPage() {
     window.location.href = "/#pricing";
   };
 
-  // Auto-check free tier status when page loads (user is always authenticated)
+  // Auto-check free tier + org status when page loads
   useEffect(() => {
-    if (!user?.email) return;
+    if (!user?.email || !session?.access_token) return;
+    const headers = { "Content-Type": "application/json", Authorization: `Bearer ${session.access_token}` };
+
     setIsCheckingFreeTier(true);
-    fetch("/api/free-tier/check", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", ...authHeaders() },
-      body: JSON.stringify({ email: user.email }),
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (data) setFreeTierStatus(data);
-      })
-      .catch(() => {})
-      .finally(() => setIsCheckingFreeTier(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    Promise.all([
+      fetch("/api/free-tier/check", { method: "POST", headers, body: JSON.stringify({ email: user.email }) })
+        .then((r) => (r.ok ? r.json() : null)),
+      fetch("/api/org", { headers })
+        .then((r) => (r.ok ? r.json() : null)),
+    ]).then(([ftData, orgData]) => {
+      if (ftData) setFreeTierStatus(ftData);
+      if (orgData?.org) setOrgRole(orgData.org.role);
+    }).catch(() => {}).finally(() => setIsCheckingFreeTier(false));
   }, [user?.email, session?.access_token]);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -308,10 +309,20 @@ export default function UploadPage() {
                   </p>
                 </div>
               </div>
-              <Button variant="ghost" size="sm" onClick={handleSignOut} className="gap-1">
-                <LogOut className="h-3.5 w-3.5" />
-                Sign out
-              </Button>
+              <div className="flex items-center gap-2">
+                {orgRole === "admin" && (
+                  <Button variant="outline" size="sm" asChild className="gap-1">
+                    <a href="/admin">
+                      <Users className="h-3.5 w-3.5" />
+                      Team
+                    </a>
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={handleSignOut} className="gap-1">
+                  <LogOut className="h-3.5 w-3.5" />
+                  Sign out
+                </Button>
+              </div>
             </CardContent>
           </Card>
 

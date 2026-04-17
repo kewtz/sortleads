@@ -16,6 +16,8 @@ import About from "@/pages/about";
 import Auth from "@/pages/auth";
 import AuthCallback from "@/pages/auth-callback";
 import History from "@/pages/history";
+import Admin from "@/pages/admin";
+import Invite from "@/pages/invite";
 import NotFound from "@/pages/not-found";
 
 /** Redirect to /auth if not signed in */
@@ -51,6 +53,12 @@ function Router() {
           <History />
         </RequireAuth>
       </Route>
+      <Route path="/admin">
+        <RequireAuth>
+          <Admin />
+        </RequireAuth>
+      </Route>
+      <Route path="/invite/:token" component={Invite} />
       <Route path="/auth" component={Auth} />
       <Route path="/auth/callback" component={AuthCallback} />
       <Route component={NotFound} />

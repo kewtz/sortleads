@@ -19,6 +19,18 @@ export interface IStorage {
   getFreeTierUser(email: string): Promise<FreeTierUser | null>;
   recordFreeTierUsage(email: string, leadsUsed: number): Promise<FreeTierUser>;
   reserveFreeTierLeads(email: string, requestedLeads: number, limit: number): Promise<{ freeLeadsApplied: number; billableLeads: number }>;
+
+  // Org methods (Portfolio tier)
+  createOrg(name: string, ownerId: string, ownerEmail: string, stripeSubscriptionId?: string): Promise<{ id: string }>;
+  getOrgByUserId(userId: string): Promise<{ id: string; name: string; ownerId: string; tier: string; role: string } | null>;
+  getOrgMembers(orgId: string): Promise<Array<{ userId: string; email: string; role: string; leadsUsed: number; status: string; invitedAt: string }>>;
+  createInvite(orgId: string, createdBy: string, email?: string): Promise<{ token: string; expiresAt: string }>;
+  getInvite(token: string): Promise<{ orgId: string; email: string | null; expiresAt: string; usedAt: string | null; orgName: string } | null>;
+  acceptInvite(token: string, userId: string, email: string): Promise<void>;
+  removeMember(orgId: string, userId: string): Promise<void>;
+  getPendingInvites(orgId: string): Promise<Array<{ id: string; email: string | null; token: string; expiresAt: string }>>;
+  revokeInvite(inviteId: string): Promise<void>;
+  incrementMemberLeadsUsed(orgId: string, userId: string, count: number): Promise<void>;
 }
 
 // Demo rate limiting: 10 demos per IP per day. Kept in-memory for simplicity —
@@ -157,11 +169,24 @@ export class DbStorage implements IStorage {
 
   async hasActiveSubscription(userId: string): Promise<boolean> {
     const pool = this.getPool();
-    const result = await pool.query(
+    // Check individual subscription
+    const individual = await pool.query(
       `SELECT 1 FROM checkout_sessions WHERE user_id = $1 AND payment_status IN ('paid', 'complete', 'no_payment_required') LIMIT 1`,
       [userId],
     );
-    return result.rows.length > 0;
+    if (individual.rows.length > 0) return true;
+
+    // Check org membership — if user belongs to an org whose owner has an active subscription
+    const orgSub = await pool.query(
+      `SELECT 1 FROM org_members om
+       JOIN organizations o ON om.org_id = o.id
+       JOIN checkout_sessions cs ON cs.user_id = o.owner_id
+         AND cs.payment_status IN ('paid', 'complete', 'no_payment_required')
+       WHERE om.user_id = $1 AND om.status = 'active'
+       LIMIT 1`,
+      [userId],
+    );
+    return orgSub.rows.length > 0;
   }
 
   async getFreeTierUsageByUserId(userId: string): Promise<{ freeLeadsUsed: number } | null> {
@@ -407,6 +432,164 @@ export class DbStorage implements IStorage {
     } finally {
       client.release();
     }
+  }
+
+  // ── Organization methods (Portfolio tier) ───────────────────────────────────
+
+  async createOrg(name: string, ownerId: string, ownerEmail: string, stripeSubscriptionId?: string) {
+    const pool = this.getPool();
+    const result = await pool.query(
+      `INSERT INTO organizations (name, owner_id, stripe_subscription_id, tier)
+       VALUES ($1, $2, $3, 'portfolio')
+       RETURNING id`,
+      [name, ownerId, stripeSubscriptionId ?? null],
+    );
+    const orgId = result.rows[0].id;
+    await pool.query(
+      `INSERT INTO org_members (org_id, user_id, email, role, status)
+       VALUES ($1, $2, $3, 'admin', 'active')`,
+      [orgId, ownerId, ownerEmail],
+    );
+    return { id: orgId };
+  }
+
+  async getOrgByUserId(userId: string) {
+    const pool = this.getPool();
+    const result = await pool.query(
+      `SELECT o.id, o.name, o.owner_id, o.tier, om.role
+       FROM org_members om JOIN organizations o ON om.org_id = o.id
+       WHERE om.user_id = $1 AND om.status = 'active'
+       LIMIT 1`,
+      [userId],
+    );
+    if (result.rows.length === 0) return null;
+    const r = result.rows[0];
+    return { id: r.id, name: r.name, ownerId: r.owner_id, tier: r.tier, role: r.role };
+  }
+
+  async getOrgMembers(orgId: string) {
+    const pool = this.getPool();
+    const result = await pool.query(
+      `SELECT user_id, email, role, leads_used, status, invited_at
+       FROM org_members WHERE org_id = $1 AND status = 'active'
+       ORDER BY role = 'admin' DESC, invited_at ASC`,
+      [orgId],
+    );
+    return result.rows.map((r: any) => ({
+      userId: r.user_id,
+      email: r.email,
+      role: r.role,
+      leadsUsed: r.leads_used,
+      status: r.status,
+      invitedAt: r.invited_at.toISOString(),
+    }));
+  }
+
+  async createInvite(orgId: string, createdBy: string, email?: string) {
+    const pool = this.getPool();
+    const token = randomUUID();
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+    await pool.query(
+      `INSERT INTO org_invites (org_id, email, token, created_by, expires_at)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [orgId, email ?? null, token, createdBy, expiresAt],
+    );
+    return { token, expiresAt: expiresAt.toISOString() };
+  }
+
+  async getInvite(token: string) {
+    const pool = this.getPool();
+    const result = await pool.query(
+      `SELECT i.org_id, i.email, i.expires_at, i.used_at, o.name AS org_name
+       FROM org_invites i JOIN organizations o ON i.org_id = o.id
+       WHERE i.token = $1`,
+      [token],
+    );
+    if (result.rows.length === 0) return null;
+    const r = result.rows[0];
+    return {
+      orgId: r.org_id,
+      email: r.email,
+      expiresAt: r.expires_at.toISOString(),
+      usedAt: r.used_at?.toISOString() ?? null,
+      orgName: r.org_name,
+    };
+  }
+
+  async acceptInvite(token: string, userId: string, email: string) {
+    const pool = this.getPool();
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const invite = await client.query(
+        "SELECT org_id FROM org_invites WHERE token = $1 AND used_at IS NULL AND expires_at > NOW()",
+        [token],
+      );
+      if (invite.rows.length === 0) throw new Error("Invite is invalid or expired");
+
+      const orgId = invite.rows[0].org_id;
+
+      // Check not already a member
+      const existing = await client.query(
+        "SELECT 1 FROM org_members WHERE org_id = $1 AND user_id = $2 AND status = 'active'",
+        [orgId, userId],
+      );
+      if (existing.rows.length === 0) {
+        await client.query(
+          `INSERT INTO org_members (org_id, user_id, email, role, status)
+           VALUES ($1, $2, $3, 'member', 'active')`,
+          [orgId, userId, email],
+        );
+      }
+
+      await client.query(
+        "UPDATE org_invites SET used_at = NOW(), used_by = $1 WHERE token = $2",
+        [userId, token],
+      );
+      await client.query("COMMIT");
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
+  }
+
+  async removeMember(orgId: string, userId: string) {
+    const pool = this.getPool();
+    await pool.query(
+      "UPDATE org_members SET status = 'removed' WHERE org_id = $1 AND user_id = $2 AND role != 'admin'",
+      [orgId, userId],
+    );
+  }
+
+  async getPendingInvites(orgId: string) {
+    const pool = this.getPool();
+    const result = await pool.query(
+      `SELECT id, email, token, expires_at FROM org_invites
+       WHERE org_id = $1 AND used_at IS NULL AND expires_at > NOW()
+       ORDER BY expires_at ASC`,
+      [orgId],
+    );
+    return result.rows.map((r: any) => ({
+      id: r.id,
+      email: r.email,
+      token: r.token,
+      expiresAt: r.expires_at.toISOString(),
+    }));
+  }
+
+  async revokeInvite(inviteId: string) {
+    const pool = this.getPool();
+    await pool.query("DELETE FROM org_invites WHERE id = $1", [inviteId]);
+  }
+
+  async incrementMemberLeadsUsed(orgId: string, userId: string, count: number) {
+    const pool = this.getPool();
+    await pool.query(
+      "UPDATE org_members SET leads_used = leads_used + $1 WHERE org_id = $2 AND user_id = $3",
+      [count, orgId, userId],
+    );
   }
 }
 

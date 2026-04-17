@@ -49,6 +49,30 @@ export class WebhookHandlers {
           userId: session.metadata?.user_id,
           amount: session.amount_total,
         });
+
+        // Auto-create an org for Portfolio subscribers
+        if (session.metadata?.tier === 'portfolio' && session.metadata?.user_id) {
+          const userId = session.metadata.user_id;
+          const email = session.customer_email || session.metadata.email || '';
+          // Check if user already has an org
+          const existingOrg = await pool.query(
+            "SELECT 1 FROM org_members WHERE user_id = $1 AND status = 'active' LIMIT 1",
+            [userId],
+          );
+          if (existingOrg.rows.length === 0) {
+            const orgResult = await pool.query(
+              `INSERT INTO organizations (name, owner_id, stripe_subscription_id, tier)
+               VALUES ($1, $2, $3, 'portfolio') RETURNING id`,
+              [`${email.split('@')[0]}'s Team`, userId, session.subscription || null],
+            );
+            await pool.query(
+              `INSERT INTO org_members (org_id, user_id, email, role, status)
+               VALUES ($1, $2, $3, 'admin', 'active')`,
+              [orgResult.rows[0].id, userId, email],
+            );
+            console.log(`Created Portfolio org for ${email} (${userId})`);
+          }
+        }
         break;
       }
       case 'payment_intent.succeeded': {

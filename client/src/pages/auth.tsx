@@ -19,10 +19,16 @@ export default function AuthPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [confirmationSent, setConfirmationSent] = useState(false);
 
-  // Redirect if already signed in
+  // Redirect if already signed in — check for invite redirect first
   useEffect(() => {
     if (!loading && user) {
-      setLocation("/upload");
+      const inviteRedirect = sessionStorage.getItem("sortleads_invite_redirect");
+      if (inviteRedirect) {
+        sessionStorage.removeItem("sortleads_invite_redirect");
+        setLocation(inviteRedirect);
+      } else {
+        setLocation("/upload");
+      }
     }
   }, [user, loading, setLocation]);
 
