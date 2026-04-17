@@ -1,113 +1,124 @@
 # SortLeads — Project Documentation
 
-> **Audience:** Junior to mid-level engineers joining the project. This doc explains what SortLeads is, how it's built, where it runs, and what state the migration is in.
+> **Audience:** Engineers joining the project. This doc explains what SortLeads is, how it's built, where it runs, and how the pieces fit together.
 
 ---
 
 ## 1. What SortLeads Is
 
-SortLeads is an **AI-powered lead prioritization tool** for B2B sales teams — specifically aimed at industrial and manufacturing companies.
+SortLeads is an **AI-powered lead prioritization tool** for B2B sales teams at manufacturing and industrial companies.
 
 ### The user problem
-A sales rep (we call the persona "Spreadsheet Steve") comes back from a trade show with a CSV of a few hundred leads. They need to know which ones to call first. Manually scanning the list is slow and subjective.
+A sales rep comes back from a trade show with a CSV of leads. They need to know which ones to call first. Sorting manually is slow and subjective.
 
 ### What the product does
-1. User uploads a CSV or Excel file of leads.
-2. User writes a plain-English description of their ideal customer (e.g., "Mid-size manufacturers in the Midwest evaluating CRM software").
-3. The backend sends each lead to Anthropic's Claude AI with that description as context.
-4. Claude returns a priority score (1–10), a Hot/Warm/Cold label, reasoning, and a suggested next action for every lead.
-5. User downloads a prioritized CSV, sorted with Hot leads at the top.
+1. User signs in (Supabase Auth — email + password).
+2. Uploads a CSV or Excel file of leads.
+3. Describes their ideal customer in plain English.
+4. The backend batches leads (10 per API call) and sends them to Claude Haiku 4.5 for scoring.
+5. Results stream live to the browser via SSE — Hot leads appear within ~20 seconds.
+6. User downloads a prioritized CSV with scores, reasoning, and suggested actions per lead.
 
 ### Business model
-- **Free tier:** First 50 leads per email address are free, no credit card required.
-- **Paid:** Flat $0.08/lead after the free allowance. Minimum charge $1.00 (covers Stripe processing fees).
-- **Payment:** Stripe Checkout (one-time payment, not subscription).
+- **Free tier:** First 50 leads per authenticated user, no credit card required.
+- **Paid tiers (annual subscriptions via Stripe Checkout):**
+
+| Plan | Price | Leads/month |
+|------|-------|-------------|
+| Essentials | $948/yr ($79/mo) | 500 |
+| Professional | $1,788/yr ($149/mo) | 2,000 |
+| Portfolio | $4,188/yr ($349/mo) | Unlimited + multi-user org |
+
+- Portfolio subscribers get an admin dashboard to invite team members, monitor usage, and manage the org.
 
 ---
 
-## 2. Current Status
+## 2. Platform Stack
 
-The project was originally built on **Replit**. It was recently migrated off Replit onto a production stack. Migration is in phases:
-
-| Phase | Description | Status |
-|-------|-------------|--------|
-| 1 | Decouple code from Replit-specific APIs and packages | Done |
-| 2 | Move database to Supabase, push schema | Done |
-| 3 | Deploy backend to Railway, deploy frontend to Vercel | Done |
-| 4 | Production hardening: auth, persistent job storage, email | Not started |
-
-**Known open items** (see Section 10 for details):
-- Supabase DB connection from Railway needs final verification after password rotation.
-- No user authentication — anyone can upload and process leads.
-- Jobs are stored in-memory on the backend, so they're lost if the Railway service restarts.
-- Stripe webhook endpoint needs to be registered in the Stripe Dashboard.
-
----
-
-## 3. Platform Stack
-
-Each external service has one clear job. Do not confuse them.
-
-| Service | Purpose | Hosted URL |
-|---------|---------|------------|
-| **Vercel** | Hosts the React frontend (static files + CDN). Serves the UI a user interacts with. | `sortleads.vercel.app` (and eventually `sortleads.io`) |
-| **Railway** | Hosts the Node.js/Express backend (API server). Runs the AI processing, file parsing, Stripe calls. | `sortleads-production.up.railway.app` |
-| **Supabase** | Managed PostgreSQL database. Stores free tier usage and payment records. | Project ref: `xtbtvkzgauxtrdepimgo` |
-| **Anthropic** | AI model provider. We use `claude-haiku-4-5` for lead scoring. | API only |
-| **Stripe** | Payment processing. Checkout sessions + webhooks for payment confirmation. | API only |
-| **GitHub** | Source control. Railway auto-deploys from `main`. | `github.com/kewtz/sortleads` |
-| **Resend** *(planned, not yet integrated)* | Transactional email (receipts, free tier welcome). | Not yet deployed |
+| Service | Purpose | URL |
+|---------|---------|-----|
+| **Vercel** | React frontend (static + CDN) | `sortleads.vercel.app` / `sortleads.io` |
+| **Railway** | Express API server | `sortleads-production.up.railway.app` |
+| **Supabase** | PostgreSQL + Auth (email/password) | Project ref: `xtbtvkzgauxtrdepimgo` |
+| **Anthropic** | Claude Haiku 4.5 for lead scoring | API only |
+| **Stripe** | Subscription checkout + webhooks | API only |
+| **GitHub** | Source control, auto-deploys | `github.com/kewtz/sortleads` |
 
 ### Why this split?
-- **Frontend on Vercel, backend on Railway** — Vercel is optimized for static sites and edge delivery. Railway runs long-lived Node processes well (which we need for Server-Sent Events during AI processing).
-- **Database on Supabase** — managed Postgres with a generous free tier and built-in auth (which we'll use in Phase 4).
-- The frontend and backend are on **different domains**, which means CORS must be configured on the backend (it is — see `server/index.ts`).
+- **Vercel** for static site delivery + CDN edge. **Railway** for long-lived processes (SSE streaming during AI scoring can run 1–2 min).
+- **Supabase** provides both the Postgres DB and the Auth system (JWT tokens, email confirmation, password reset) — no separate auth service needed.
+- Frontend and backend are on **different domains** → CORS is configured in `server/index.ts`.
 
 ---
 
-## 4. Architecture Overview
+## 3. Architecture
 
 ```
- ┌─────────────────┐        ┌──────────────────────┐
- │   User Browser  │        │     Stripe API       │
- │  (sortleads.io) │        └──────────────────────┘
- └────────┬────────┘                   ▲
-          │ 1. Loads UI                 │ 4. Creates checkout
-          ▼                             │    session, sends
- ┌─────────────────┐                    │    webhook
- │     Vercel      │                    │
- │ (React frontend)│                    │
- └────────┬────────┘                    │
-          │ 2. API calls                │
-          │ (relative /api/*, proxied)  │
-          ▼                             │
- ┌─────────────────┐      3. Calls      │
- │    Railway      │ ─────────────────► │
- │ (Express API)   │ ─────┐             │
- └────────┬────────┘      │             │
-          │ 5. Reads/     │ 6. Scores   │
-          │  writes       │  leads      │
-          ▼               ▼             │
- ┌─────────────────┐  ┌──────────┐     │
- │    Supabase     │  │Anthropic │     │
- │   (Postgres)    │  │ Claude   │     │
- └─────────────────┘  └──────────┘     │
-          ▲                             │
-          └─────────────────────────────┘
-                  7. Webhook writes
-                     payment record
+ ┌──────────────┐     ┌───────────────────┐
+ │  Browser     │     │  Stripe           │
+ │ sortleads.io │     │  (subscriptions)  │
+ └──────┬───────┘     └────────┬──────────┘
+        │ 1. SPA                │ 5. Webhook
+        ▼                       ▼
+ ┌──────────────┐     ┌───────────────────┐
+ │   Vercel     │     │    Railway        │
+ │ (React app)  │────▶│  (Express API)    │
+ └──────────────┘     └──┬─────────┬──────┘
+   /api/* proxy           │         │
+                    3. DB │         │ 4. AI
+                          ▼         ▼
+                   ┌──────────┐ ┌──────────┐
+                   │ Supabase │ │Anthropic │
+                   │ Postgres │ │ Haiku    │
+                   │  + Auth  │ └──────────┘
+                   └──────────┘
 ```
 
-### How a request flows (concrete example: a paid job)
-1. User visits the site → Vercel serves the React app.
-2. User uploads `leads.csv` and types an ICP description → frontend `POST /api/jobs` to Railway (via Vercel rewrite).
-3. Railway parses the file, checks free tier usage (Supabase query), reserves free leads atomically, returns a `jobId` and a pricing quote.
-4. Frontend calls `POST /api/checkout` → Railway creates a Stripe Checkout session and returns a URL.
-5. User enters card details on Stripe's hosted page → Stripe charges the card.
-6. Stripe redirects back to `/processing/{jobId}?paid=true`, and in parallel calls our webhook at `/api/stripe/webhook` → Railway verifies the signature and writes a row to `checkout_sessions` in Supabase.
-7. Frontend calls `POST /api/jobs/{id}/start` → Railway verifies the Stripe session status, then begins AI processing.
-8. Railway processes leads in batches of 10, sending each to Claude. Progress is streamed back via Server-Sent Events (`GET /api/jobs/{id}/stream`).
-9. When complete, the user downloads the sorted CSV from `GET /api/jobs/{id}/download`.
+### Key flows
+
+**Sign up → Upload → Score → Download:**
+1. User signs up at `/auth` → Supabase creates account + sends confirmation email.
+2. After confirmation, user signs in → gets a JWT.
+3. User uploads a file at `/upload` → frontend sends `POST /api/jobs` with `Authorization: Bearer <jwt>`.
+4. Backend validates JWT (`optionalAuth` middleware), checks free-tier/subscription status, parses file, creates a job row in Postgres.
+5. If within free tier or subscribed → processing starts immediately. If over limit → redirected to `/#pricing`.
+6. `analyzeLeadsBatch()` sends 10 leads per Claude call. Results stream to the browser via SSE on `/api/jobs/:id/stream`.
+7. Each batch result is atomically appended to the `jobs.results` jsonb column.
+8. User downloads CSV from `/api/jobs/:id/download`, or retrieves past results from `/history`.
+
+**Subscription checkout:**
+1. User clicks "Get started" on a pricing tier → if not signed in, redirects to `/auth`.
+2. After sign-in → `POST /api/checkout` with `{ tier }` + Bearer token.
+3. Backend creates a Stripe subscription checkout session with user_id in metadata.
+4. Stripe redirects to `/upload?subscribed=true` on success.
+5. Webhook (`checkout.session.completed`) writes to `checkout_sessions` table. If Portfolio tier → auto-creates an org + admin membership.
+
+**Portfolio org invite:**
+1. Admin visits `/admin` → creates an invite link (`/invite/{token}`, expires in 7 days).
+2. Shares the link (Slack, email, etc.).
+3. Invitee clicks → redirected to `/auth` if not signed in → after sign-in, auto-accepted into the org.
+4. Org members inherit the Portfolio subscription — unlimited leads, no individual payment.
+
+---
+
+## 4. Database Schema
+
+Six tables in Supabase (defined in `shared/schema.ts`, pushed via `drizzle-kit push`):
+
+| Table | Purpose |
+|-------|---------|
+| `free_tier_users` | Tracks free lead usage per email + user_id |
+| `checkout_sessions` | Stripe payment records (subscription or one-time) |
+| `jobs` | All uploaded jobs — metadata + `leads` jsonb (input) + `results` jsonb (scored output) |
+| `organizations` | Portfolio orgs — name, owner_id, tier |
+| `org_members` | Org membership — user_id, role (admin/member), leads_used counter |
+| `org_invites` | Pending invite tokens with expiry |
+
+### Key columns on `jobs`
+- `leads`: jsonb — the input Lead[] from the uploaded file
+- `results`: jsonb — the scored ProcessedLead[] (appended atomically via `results || $1::jsonb`)
+- `user_id`: text — links job to the authenticated user
+- `status`: pending → processing → completed / failed
 
 ---
 
@@ -115,282 +126,254 @@ Each external service has one clear job. Do not confuse them.
 
 ```
 sortleads-export/
-├── client/                    React frontend (built by Vite)
-│   ├── index.html             HTML shell + analytics tags
-│   ├── public/                Static assets (favicon, robots.txt, sitemap.xml)
+├── client/
+│   ├── index.html                 HTML shell + meta tags + OG image
+│   ├── public/                    Static assets (favicon, og-image, robots, sitemap)
 │   └── src/
-│       ├── main.tsx           React entry point
-│       ├── App.tsx            Router setup (uses wouter)
-│       ├── index.css          Global styles (Tailwind)
+│       ├── main.tsx               React entry point
+│       ├── App.tsx                Router + AuthProvider + RequireAuth wrapper
+│       ├── context/
+│       │   └── AuthContext.tsx     Supabase Auth state (session, user, signIn/Out)
+│       ├── lib/
+│       │   ├── supabase.ts        Supabase client init (VITE_SUPABASE_URL/ANON_KEY)
+│       │   ├── analytics.ts       GA4, PostHog, Clarity
+│       │   ├── queryClient.ts     TanStack Query
+│       │   ├── types.ts           Shared TS types + FREE_TIER_LEAD_LIMIT
+│       │   └── utils.ts
 │       ├── components/
-│       │   ├── header.tsx
+│       │   ├── header.tsx         Nav bar (auth-aware: Sign in / email + Sort My Leads)
 │       │   ├── theme-toggle.tsx
-│       │   └── ui/            shadcn/ui components (~56 files)
-│       ├── pages/
-│       │   ├── home.tsx
-│       │   ├── upload.tsx
-│       │   ├── processing.tsx
-│       │   ├── results.tsx
-│       │   ├── privacy.tsx
-│       │   ├── terms.tsx
-│       │   └── not-found.tsx
-│       ├── hooks/             Custom React hooks
-│       └── lib/
-│           ├── analytics.ts   GA4, PostHog, Clarity wrappers
-│           ├── queryClient.ts TanStack Query config
-│           ├── types.ts       Shared TypeScript types
-│           └── utils.ts
+│       │   └── ui/                shadcn/ui components
+│       └── pages/
+│           ├── home.tsx           Landing page (tier pricing, demo, About link)
+│           ├── auth.tsx           Sign in / Sign up / Reset password
+│           ├── auth-callback.tsx  Supabase email confirmation handler
+│           ├── upload.tsx         File upload (auth-required, shows subscription status)
+│           ├── processing.tsx     Live SSE results table during scoring
+│           ├── results.tsx        Full results + download + bulk actions
+│           ├── history.tsx        Past uploads list (auth-required)
+│           ├── admin.tsx          Portfolio org dashboard (admin-only)
+│           ├── invite.tsx         Org invite acceptance
+│           ├── about.tsx          Founder / practitioner page
+│           ├── privacy.tsx        Privacy policy
+│           ├── terms.tsx          Terms of service
+│           └── not-found.tsx
 │
-├── server/                    Express backend
-│   ├── index.ts               App entry: middleware, CORS, webhook, listen
-│   ├── routes.ts              All API endpoints (~890 lines)
-│   ├── storage.ts             Job state (in-memory) + Supabase free tier queries
-│   ├── stripeClient.ts        Stripe SDK initialization
-│   ├── webhookHandlers.ts     Stripe webhook signature verification + DB write
-│   ├── static.ts              Serves built frontend in production
-│   └── vite.ts                Vite dev server integration (dev only)
+├── server/
+│   ├── index.ts                   Express app: CORS, webhook route, JSON middleware
+│   ├── auth.ts                    requireAuth + optionalAuth Express middleware
+│   ├── routes.ts                  All API endpoints (~1100 lines)
+│   ├── storage.ts                 DbStorage class (Postgres-backed job + org CRUD)
+│   ├── stripeClient.ts            Stripe SDK init from env vars
+│   ├── webhookHandlers.ts         Stripe webhook: checkout_sessions + auto-create org
+│   ├── static.ts                  Serves built frontend in production
+│   └── vite.ts                    Vite dev server (development only)
 │
 ├── shared/
-│   └── schema.ts              Zod schemas + Drizzle pgTable definitions
-│                              (shared between client and server)
+│   └── schema.ts                  Drizzle pgTable definitions + Zod schemas
 │
 ├── script/
-│   ├── build.ts               Custom build script (vite + esbuild for server)
-│   └── test-supabase.ts       Standalone DB connection test
+│   ├── build.ts                   Vite (client) + esbuild (server → ESM bundle)
+│   └── test-supabase.ts           DB connection verification
 │
-├── drizzle.config.ts          Drizzle ORM config (for migrations)
-├── vite.config.ts             Vite frontend config
-├── tailwind.config.ts         Tailwind theme
-├── tsconfig.json
+├── vercel.json                    /api/* rewrite to Railway + SPA fallback
+├── drizzle.config.ts
+├── vite.config.ts
+├── tailwind.config.ts
 ├── package.json
-└── ARCHITECTURE.md            (this file)
+└── ARCHITECTURE.md                (this file)
 ```
-
-### Key design points
-- **Shared schema:** `shared/schema.ts` is imported by both `client/` and `server/` so request/response shapes stay in sync. It also holds the Drizzle `pgTable` declarations used to generate migrations.
-- **Relative API URLs:** The frontend always calls `/api/...` (never an absolute URL). In production, Vercel rewrites these to the Railway backend. This makes it easy to run everything locally on one port.
-- **No auth code:** Despite `passport` being in old dependency lists, there is currently no login or user accounts. This is a Phase 4 item.
 
 ---
 
-## 6. Tech Stack (Dependencies)
+## 6. Environment Variables
 
-### Frontend
-- **React 18** + **TypeScript 5.6** — UI framework and type system
-- **Vite 7** — dev server and production bundler
-- **Wouter** — a tiny client-side router (not React Router)
-- **TanStack Query** — data fetching and caching
-- **shadcn/ui + Radix** — accessible component primitives
-- **Tailwind CSS** — utility-first styling
-- **xlsx** — client-side Excel/CSV parsing before upload
+### Railway (backend)
 
-### Backend
-- **Express 5** — HTTP server framework
-- **Anthropic SDK** — calls Claude Haiku 4.5
-- **Stripe SDK** — payment processing
-- **pg** — PostgreSQL client (raw queries for free tier)
-- **Drizzle ORM** — used only for schema/migrations, not queries (yet)
-- **multer** — multipart file uploads
-- **p-limit, p-retry** — batch processing with rate-limit handling
+| Variable | Purpose |
+|----------|---------|
+| `DATABASE_URL` | Supabase pooler: `postgresql://postgres.<ref>:<pw>@aws-1-us-east-2.pooler.supabase.com:6543/postgres` |
+| `ANTHROPIC_API_KEY` | Claude API key (`sk-ant-...`) |
+| `STRIPE_SECRET_KEY` | Stripe secret key (`sk_live_...`) |
+| `STRIPE_PUBLISHABLE_KEY` | Stripe publishable key (`pk_live_...`) |
+| `STRIPE_WEBHOOK_SECRET` | Webhook signing secret (`whsec_...`) |
+| `STRIPE_PRICE_ESSENTIALS` | Stripe Price ID for Essentials tier |
+| `STRIPE_PRICE_PROFESSIONAL` | Stripe Price ID for Professional tier |
+| `STRIPE_PRICE_PORTFOLIO` | Stripe Price ID for Portfolio tier |
+| `SUPABASE_URL` | `https://<ref>.supabase.co` |
+| `SUPABASE_SERVICE_ROLE_KEY` | Service role key (server-side JWT validation) |
+| `PORT` | Set by Railway automatically |
+| `NODE_ENV` | `production` |
 
-### Shared
-- **Zod** — runtime validation for request/response data
+### Vercel (frontend)
 
----
-
-## 7. Environment Variables
-
-These are set in the respective platform's dashboard (Vercel for frontend, Railway for backend). They are **not** committed to the repo.
-
-### Backend (Railway)
-
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `DATABASE_URL` | Yes | Supabase pooler connection string |
-| `ANTHROPIC_API_KEY` | Yes | Claude API key (starts with `sk-ant-...`) |
-| `STRIPE_SECRET_KEY` | Yes | Stripe secret key (`sk_test_...` or `sk_live_...`) |
-| `STRIPE_PUBLISHABLE_KEY` | Yes | Stripe publishable key (`pk_test_...` or `pk_live_...`) |
-| `STRIPE_WEBHOOK_SECRET` | Yes | Webhook signing secret (`whsec_...`) |
-| `NODE_ENV` | Yes | `production` on Railway |
-| `PORT` | Auto | Railway sets this automatically |
-
-**The correct DATABASE_URL format** is Supabase's shared pooler:
-```
-postgresql://postgres.<PROJECT_REF>:<PASSWORD>@aws-1-us-east-2.pooler.supabase.com:6543/postgres
-```
-Any special characters in the password (`#`, `^`, `*`, `@`, `/`, `:`, `?`, `&`) must be URL-encoded.
-
-### Frontend (Vercel)
-
-| Variable | Required | Purpose |
-|----------|----------|---------|
-| `VITE_GA4_MEASUREMENT_ID` | Optional | Google Analytics 4 ID |
-| `VITE_POSTHOG_API_KEY` | Optional | PostHog product analytics |
-| `VITE_POSTHOG_HOST` | Optional | Defaults to `https://us.i.posthog.com` |
-| `VITE_CLARITY_PROJECT_ID` | Optional | Microsoft Clarity session replay |
-
-The `VITE_` prefix is required — Vite only exposes variables with that prefix to the browser.
+| Variable | Purpose |
+|----------|---------|
+| `VITE_SUPABASE_URL` | Same as backend `SUPABASE_URL` |
+| `VITE_SUPABASE_ANON_KEY` | Supabase anon/public key (safe for browser) |
+| `VITE_GA4_MEASUREMENT_ID` | Google Analytics (optional) |
+| `VITE_POSTHOG_API_KEY` | PostHog analytics (optional) |
+| `VITE_CLARITY_PROJECT_ID` | Microsoft Clarity (optional) |
 
 ---
 
-## 8. Running Locally
+## 7. API Endpoints
 
-### Prerequisites
-- Node.js 20+
-- npm
-- A copy of the environment variables in a `.env` file at the project root (not committed)
+### Public
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/demo/available` | Check demo rate limit (IP-based) |
+| POST | `/api/demo` | Start a 50-lead demo job |
+| GET | `/api/org/invite/:token` | Get invite details (org name) |
 
-### Commands
+### optionalAuth (works with or without JWT)
+| Method | Path | Purpose |
+|--------|------|---------|
+| POST | `/api/free-tier/check` | Check free lead allowance |
+| POST | `/api/jobs` | Upload file + create job |
 
-```bash
-# Install dependencies
-npm install
+### requireAuth (JWT required)
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/jobs` | List user's jobs (metadata only) |
+| POST | `/api/jobs/:id/cancel` | Cancel pending/processing job |
+| POST | `/api/checkout` | Create Stripe subscription checkout |
+| GET | `/api/org` | Get user's org |
+| GET | `/api/org/members` | List org members (admin) |
+| POST | `/api/org/invite` | Create invite link (admin) |
+| GET | `/api/org/invites` | List pending invites (admin) |
+| DELETE | `/api/org/invites/:id` | Revoke invite (admin) |
+| POST | `/api/org/invite/:token/accept` | Accept invite |
+| DELETE | `/api/org/members/:userId` | Remove member (admin) |
 
-# Start the dev server (frontend + backend on port 5000)
-npm run dev
-
-# Type-check without building
-npm run check
-
-# Production build
-npm run build
-
-# Run the production build locally
-npm start
-
-# Push schema changes to Supabase
-DATABASE_URL="..." npm run db:push
-
-# Verify Supabase connection works
-DATABASE_URL="..." npx tsx script/test-supabase.ts
-```
-
-### How the dev server works
-`npm run dev` runs `tsx server/index.ts`, which:
-1. Starts the Express server on port 5000.
-2. Mounts Vite as middleware (via `server/vite.ts`) — this means HMR-enabled React and API requests are served from the **same port**, identical to production. No CORS issues locally.
-
----
-
-## 9. Deployment Workflow
-
-```
-Developer pushes to main
-          │
-          ▼
-┌────────────────────┐        ┌────────────────────┐
-│      GitHub        │───────►│     Railway        │
-│  (github.com/      │        │  Rebuilds server   │
-│   kewtz/sortleads) │        │  Restarts service  │
-└────────────────────┘        └────────────────────┘
-          │
-          ▼
-┌────────────────────┐
-│      Vercel        │
-│  Rebuilds frontend │
-│  Invalidates CDN   │
-└────────────────────┘
-```
-
-Both Railway and Vercel are connected to the GitHub repo and auto-deploy on push to `main`. There is no staging environment yet — every commit to `main` goes to production.
-
-### Build commands
-- **Vercel (frontend):** `npx vite build`. Outputs to `dist/public/`.
-- **Railway (backend):** `npm run build`, which runs `script/build.ts`. Outputs to `dist/index.cjs`.
-- **Railway start:** `npm start` → `node dist/index.cjs`.
-
-### CORS
-The backend allows requests from:
-- `https://sortleads.io`
-- `https://www.sortleads.io`
-- `https://sortleads-production.up.railway.app`
-- Any `*.vercel.app` subdomain (for preview deployments)
-- `localhost:5173` and `localhost:5000` (development only)
-
-CORS config lives in `server/index.ts`. Update it if the production domain changes.
+### No auth (public or SSE)
+| Method | Path | Purpose |
+|--------|------|---------|
+| GET | `/api/jobs/:id` | Get job status + results |
+| GET | `/api/jobs/:id/stream` | SSE real-time progress |
+| GET | `/api/jobs/:id/download` | Download CSV |
+| POST | `/api/stripe/webhook` | Stripe webhook (raw body) |
+| POST | `/api/enhance-prompt` | AI prompt expansion |
+| GET | `/api/stripe/publishable-key` | Stripe public key |
 
 ---
 
-## 10. Migration History (Why Some Things Look Odd)
+## 8. AI Scoring Pipeline
 
-This project used to run on **Replit** and relied on Replit-specific APIs (`@replit/*` packages, `stripe-replit-sync`, Replit Connectors for managing Stripe credentials, Replit AI Integrations for proxying Anthropic calls). All of that has been removed.
+### Key parameters (all in `server/routes.ts`)
+| Parameter | Value | Notes |
+|-----------|-------|-------|
+| Model | `claude-haiku-4-5` | Cost-optimized, fast |
+| Batch size | 10 leads/call | 44 leads = 5 API calls |
+| Concurrency | `pLimit(3)` | Module-level cap |
+| Retries | 5 | p-retry on 429/529 only |
+| Min backoff | 12s | Covers 10-13s retry-after |
+| Max tokens | `max(500, N * 300)` | Scales with batch size |
+| SDK retries | 0 | Disabled — p-retry handles it |
 
-### What changed in Phase 1
-- `server/stripeClient.ts` was rewritten to use `STRIPE_SECRET_KEY` directly instead of fetching credentials from the Replit Connectors API.
-- `server/webhookHandlers.ts` was rewritten to use `stripe.webhooks.constructEvent()` with a `STRIPE_WEBHOOK_SECRET` rather than delegating to `stripe-replit-sync`.
-- `server/index.ts` lost its startup calls to `runMigrations()`, `findOrCreateManagedWebhook()`, and `syncBackfill()`.
-- `server/routes.ts` Anthropic client now reads `ANTHROPIC_API_KEY` directly (not `AI_INTEGRATIONS_ANTHROPIC_API_KEY`).
-- `vite.config.ts` dropped `@replit/vite-plugin-*` imports.
-- Deleted directories: `server/replit_integrations/`, `client/replit_integrations/`, `.local/`.
-- Deleted packages: `stripe-replit-sync`, all `@replit/*` plugins, plus unused dependencies (`passport`, `passport-local`, `express-session`, `connect-pg-simple`, `memorystore`, `openai`).
+### Prompt architecture
+The system prompt is a detailed senior-BDR-coach persona that:
+- Expands vague ICPs into full qualification frameworks before scoring
+- Reads company name patterns, title authority levels, PE/timing signals
+- Calibrates conservatively ("Hot = rep calls first thing Monday morning")
+- Generates specific, personalized suggested actions (not generic "follow up")
+- Resists prompt injection in lead data fields
 
-### What changed in Phase 2
-- Added Drizzle table definitions for `free_tier_users` and `checkout_sessions` in `shared/schema.ts`.
-- Pushed schema to Supabase with `drizzle-kit push`.
-- The webhook handler now writes completed checkout sessions to the `checkout_sessions` table.
+### Performance (44-lead benchmark)
+| Metric | Value |
+|--------|-------|
+| Total time | ~75-105s |
+| Success rate | 100% (0 failures) |
+| First results visible | ~17s |
+| API calls | 5 (10 leads each) |
 
-### What changed in Phase 3
-- Added CORS middleware to `server/index.ts` for the new cross-origin setup.
-- Fixed the `prioritized-{fileName}.csv.csv` double-extension bug.
+---
 
-### Legacy files you may still see
-- `replit.md` — still in the repo as documentation, but no longer authoritative. This file (`ARCHITECTURE.md`) supersedes it.
-- `attached_assets/` — contains old pasted code snippets and strategy docs. Not used by the build.
+## 9. Authentication
+
+### Stack
+- **Supabase Auth** — email + password, JWT tokens
+- **Backend middleware:** `server/auth.ts` — `requireAuth` (401 if no token) and `optionalAuth` (proceeds either way)
+- **Frontend context:** `client/src/context/AuthContext.tsx` — session, user, signIn/signUp/signOut/resetPassword
+- **Route protection:** `RequireAuth` wrapper in `App.tsx` for `/upload`, `/history`, `/admin`
+
+### Flow
+1. User signs up → Supabase sends confirmation email.
+2. User clicks confirm link → lands on `/auth/callback` → redirected to `/upload`.
+3. All authenticated API calls include `Authorization: Bearer <access_token>`.
+4. Backend validates via `supabase.auth.getUser(token)` using the service role key.
+5. Sign-out clears the session client-side.
+
+### Free tier tracking
+- **Authenticated users:** tracked by `user_id` in `free_tier_users`. New auth users get a fresh 50-lead allowance even if their email was used before auth existed.
+- **Unauthenticated users (demo only):** tracked by email.
+
+---
+
+## 10. Build System
+
+### esbuild (server)
+- **Output format:** ESM (`dist/index.mjs`) — required for ESM-only deps (p-limit, p-retry)
+- **Banner shims:** `createRequire`, `__dirname`, `__filename` injected for CJS compat
+- **Bundled deps** (in allowlist): `@supabase/supabase-js`, `p-limit`, `p-retry`, `stripe`, `express`, `pg`, `multer`, `xlsx`, `zod`, and others
+- **External deps:** everything NOT in the allowlist — must be in `node_modules` at runtime
+- Start command: `node dist/index.mjs`
+
+### Vite (client)
+- Output: `dist/public/` (static files)
+- Aliases: `@` → `client/src`, `@shared` → `shared/`, `@assets` → `attached_assets/`
+
+### Common Railway deploy issue
+If a new dependency is added but Railway caches the old `npm ci`, the container will crash with a module-not-found error. Fix: add the dep to the allowlist in `script/build.ts` so it gets bundled and has no runtime dependency.
 
 ---
 
 ## 11. Remaining Work
 
-### P0 (blocks real users)
-- **Supabase connection from Railway:** After the recent DB password rotation, the free-tier endpoint returns 500. Re-verify the password is URL-encoded correctly in Railway's `DATABASE_URL` variable.
-- **Stripe webhook endpoint:** Register `https://sortleads-production.up.railway.app/api/stripe/webhook` in Stripe Dashboard → Developers → Webhooks. Listen for `checkout.session.completed` at minimum.
+### Active
+- [ ] **Supabase email templates** — confirmation + password reset emails use Supabase defaults (ugly). Customize in Supabase Dashboard → Authentication → Email Templates.
+- [ ] **Stripe webhook registration** — register `https://sortleads-production.up.railway.app/api/stripe/webhook` in Stripe Dashboard for `checkout.session.completed`.
+- [ ] **Per-member lead quotas** — schema has `lead_quota` on `org_members` but not yet enforced. Admin can see usage but can't cap individual members.
+- [ ] **Custom domain** — `sortleads.io` → Vercel DNS not yet confirmed.
 
-### P1 (Phase 4 production hardening)
-- **Authentication:** No auth exists. Anyone can upload files. Free tier tracking by email is unverified. Add Supabase Auth.
-- **Persistent job storage:** Jobs live in an in-memory `Map` on the backend. If Railway restarts mid-process, in-flight jobs are lost. Move to Supabase tables.
-- **Transactional email:** Add Resend for payment receipts, free tier welcome, and job completion notifications.
-- **Bundle size:** Frontend JS is 680KB minified (221KB gzipped). Code-split with dynamic imports to reduce initial load.
-
-### P2 (nice-to-have)
-- Replace in-memory IP rate limit for `/api/demo` with a Supabase-backed counter (survives restarts, works across multiple Railway instances).
-- Add a proper staging environment.
-- Add automated tests (there are none).
+### Future
+- [ ] Transactional email via Resend (receipts, invite notifications)
+- [ ] On-startup recovery of orphaned `status='processing'` jobs
+- [ ] Demo rate limiting persisted to DB (currently in-memory, resets on deploy)
+- [ ] Code-split the frontend bundle (currently ~900KB minified)
+- [ ] Automated tests
+- [ ] Staging environment
 
 ---
 
-## 12. Troubleshooting & Gotchas
+## 12. Troubleshooting
 
-### "Failed to check free tier status" (HTTP 500 from `/api/free-tier/check`)
-Almost always a `DATABASE_URL` problem. Checklist:
-1. Is the password URL-encoded? Special characters like `#`, `^`, `*` must be percent-encoded.
-2. Is the hostname `aws-1-us-east-2.pooler.supabase.com`? (Note: `aws-1`, not `aws-0`.)
-3. Is the port `6543`? (Transaction mode pooler. Session mode on 5432 also works but is typically used for migrations.)
-4. Is the user `postgres.<PROJECT_REF>` format (required for the shared pooler)?
-5. Is the Supabase project active and not paused?
+### Railway "Container failed to start"
+Build succeeds but runtime crashes. Most common cause: a dependency is external (not in the esbuild allowlist) and Railway's cached `node_modules` doesn't have it. Fix: add the package to the allowlist in `script/build.ts`.
 
-Run `npx tsx script/test-supabase.ts` locally with the suspected `DATABASE_URL` to isolate the issue.
+### DATABASE_URL issues
+1. Password must be URL-encoded (`#` → `%23`, `^` → `%5E`, `*` → `%2A`)
+2. Hostname is `aws-1-us-east-2` (not `aws-0`)
+3. Port `6543` (shared pooler). Direct DB is IPv6-only from this Supabase project.
+4. If `DATABASE_URL` is empty/undefined, `pg` falls back to `localhost:5432` → `ECONNREFUSED` loop
 
-### Stripe checkout returns 500
-Check `STRIPE_SECRET_KEY` and `STRIPE_PUBLISHABLE_KEY` on Railway. They must start with `sk_` and `pk_` respectively. A non-standard prefix (e.g., `mk_`) indicates an old Replit-connector value that was never replaced.
+### Auth token issues
+- Backend returns 401 "Authentication required" → check that `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set on Railway
+- Frontend redirects to `/auth` unexpectedly → session expired, user needs to sign in again
+- After Supabase email confirmation, user lands on wrong page → check `Authentication → URL Configuration → Redirect URLs` includes your domain + `/auth/callback`
 
-### SSE (Server-Sent Events) drops on Vercel
-SSE is used on the processing page to stream progress. The backend supports it, but **Vercel serverless functions have a duration limit**. Since our backend is on **Railway** (long-running Node process), SSE works fine — but this will break if anyone tries to move the backend to Vercel functions.
+### Scoring failures show "Analysis error: ..."
+This is intentional — the system surfaces real Anthropic errors (rate limits, JSON parse failures) in the lead's reasoning field rather than hiding them behind a fake priority=5/"Warm" fallback. If you see 429 errors, the org's Anthropic RPM limit may need upgrading.
 
-### Stripe webhook gets HTTP 400
-The webhook route must be registered **before** `express.json()` middleware — otherwise the request body gets parsed and the signature verification fails (it needs the raw buffer). This is enforced in `server/index.ts`.
-
-### Frontend env vars not picked up
-Vite only exposes variables prefixed with `VITE_` to the browser. If a variable is missing, check it's set in Vercel with the correct prefix, and that the build was redeployed after the variable was added.
-
-### Live Stripe keys in production
-Verify intent before sharing the URL publicly. Live keys charge real cards. Use `sk_test_...` / `pk_test_...` when developing or demoing.
+### Stripe checkout returns 401
+`/api/checkout` requires auth (`requireAuth`). If the user isn't signed in, the pricing page redirects to `/auth` first. If they're signed in but the token is expired, they'll get 401 — sign out and back in.
 
 ---
 
 ## 13. Useful Links
 
-| Thing | Where |
-|-------|-------|
+| Resource | URL |
+|----------|-----|
 | Production frontend | https://sortleads.vercel.app |
 | Production backend | https://sortleads-production.up.railway.app |
 | GitHub repo | https://github.com/kewtz/sortleads |
@@ -402,4 +385,4 @@ Verify intent before sharing the URL publicly. Live keys charge real cards. Use 
 
 ---
 
-*Last updated: 2026-04-16*
+*Last updated: 2026-04-17*
