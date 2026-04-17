@@ -3,7 +3,8 @@ import type { Job, Lead, ProcessedLead, FreeTierUser } from "@shared/schema";
 import pg from "pg";
 
 export interface IStorage {
-  createJob(fileName: string, prompt: string, leads: Lead[], isDemo?: boolean, email?: string, freeLeadsApplied?: number): Promise<Job>;
+  createJob(fileName: string, prompt: string, leads: Lead[], isDemo?: boolean, email?: string, freeLeadsApplied?: number, userId?: string): Promise<Job>;
+  hasActiveSubscription(userId: string): Promise<boolean>;
   getJob(id: string): Promise<Job | undefined>;
   updateJob(id: string, updates: Partial<Job>): Promise<void>;
   updateJobStatus(id: string, status: Job["status"], error?: string): Promise<void>;
@@ -40,6 +41,7 @@ interface JobDbRow {
   stripe_session_id: string | null;
   paid_amount_cents: number | null;
   email: string | null;
+  user_id: string | null;
   free_leads_applied: number | null;
   created_at: Date;
   updated_at: Date;
@@ -55,6 +57,7 @@ const UPDATABLE_FIELDS: Record<string, string> = {
   processedLeads: "processed_leads",
   stripeSessionId: "stripe_session_id",
   paidAmountCents: "paid_amount_cents",
+  userId: "user_id",
   freeLeadsApplied: "free_leads_applied",
 };
 
@@ -73,6 +76,7 @@ function rowToJob(row: JobDbRow): Job {
     isDemo: row.is_demo,
     stripeSessionId: row.stripe_session_id ?? undefined,
     paidAmountCents: row.paid_amount_cents ?? undefined,
+    userId: row.user_id ?? undefined,
     email: row.email ?? undefined,
     freeLeadsApplied: row.free_leads_applied ?? undefined,
   };
@@ -123,14 +127,15 @@ export class DbStorage implements IStorage {
     isDemo?: boolean,
     email?: string,
     freeLeadsApplied?: number,
+    userId?: string,
   ): Promise<Job> {
     const id = randomUUID();
     const pool = this.getPool();
     const result = await pool.query<JobDbRow>(
       `INSERT INTO jobs (
          id, status, total_leads, processed_leads, prompt, file_name,
-         leads, results, is_demo, email, free_leads_applied
-       ) VALUES ($1, 'pending', $2, 0, $3, $4, $5::jsonb, '[]'::jsonb, $6, $7, $8)
+         leads, results, is_demo, email, free_leads_applied, user_id
+       ) VALUES ($1, 'pending', $2, 0, $3, $4, $5::jsonb, '[]'::jsonb, $6, $7, $8, $9)
        RETURNING *`,
       [
         id,
@@ -141,9 +146,19 @@ export class DbStorage implements IStorage {
         isDemo || false,
         email ?? null,
         freeLeadsApplied ?? null,
+        userId ?? null,
       ],
     );
     return rowToJob(result.rows[0]);
+  }
+
+  async hasActiveSubscription(userId: string): Promise<boolean> {
+    const pool = this.getPool();
+    const result = await pool.query(
+      `SELECT 1 FROM checkout_sessions WHERE user_id = $1 AND payment_status = 'complete' LIMIT 1`,
+      [userId],
+    );
+    return result.rows.length > 0;
   }
 
   async getJob(id: string): Promise<Job | undefined> {

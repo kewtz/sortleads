@@ -2,10 +2,12 @@ import { Link, useLocation } from "wouter";
 import { FileSpreadsheet } from "lucide-react";
 import { ThemeToggle } from "./theme-toggle";
 import { Button } from "@/components/ui/button";
+import { useAuth } from "@/context/AuthContext";
 
 export function Header() {
   const [location] = useLocation();
-  
+  const { user } = useAuth();
+
   const scrollToSection = (id: string) => {
     if (location !== "/") {
       window.location.href = `/#${id}`;
@@ -13,7 +15,7 @@ export function Header() {
     }
     const el = document.getElementById(id);
     if (el) {
-      el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
     }
   };
 
@@ -28,32 +30,17 @@ export function Header() {
             SortLeads<span className="text-primary">.io</span>
           </span>
         </Link>
-        
+
         <nav className="flex items-center gap-1">
           {location === "/" && (
             <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => scrollToSection('sample-output')}
-                data-testid="nav-sample-output"
-              >
+              <Button variant="ghost" size="sm" onClick={() => scrollToSection("sample-output")} data-testid="nav-sample-output">
                 Example
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => scrollToSection('how-it-works')}
-                data-testid="nav-how-it-works"
-              >
+              <Button variant="ghost" size="sm" onClick={() => scrollToSection("how-it-works")} data-testid="nav-how-it-works">
                 How It Works
               </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => scrollToSection('pricing')}
-                data-testid="nav-pricing"
-              >
+              <Button variant="ghost" size="sm" onClick={() => scrollToSection("pricing")} data-testid="nav-pricing">
                 Pricing
               </Button>
             </>
@@ -66,9 +53,15 @@ export function Header() {
           <Button variant="ghost" size="sm" asChild data-testid="nav-about">
             <Link href="/about">About</Link>
           </Button>
-          <Button variant="default" size="sm" asChild data-testid="link-start">
-            <Link href="/upload">Sort My Leads</Link>
-          </Button>
+          {user ? (
+            <Button variant="default" size="sm" asChild data-testid="link-start">
+              <Link href="/upload">Sort My Leads</Link>
+            </Button>
+          ) : (
+            <Button variant="default" size="sm" asChild data-testid="link-sign-in">
+              <Link href="/auth">Sign in</Link>
+            </Button>
+          )}
           <ThemeToggle />
         </nav>
       </div>

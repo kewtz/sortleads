@@ -7,6 +7,7 @@ import { z } from "zod";
 export const freeTierUsers = pgTable("free_tier_users", {
   id: serial("id").primaryKey(),
   email: text("email").notNull().unique(),
+  userId: text("user_id"),
   freeLeadsUsed: integer("free_leads_used").notNull().default(0),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
   lastUsedAt: timestamp("last_used_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -16,6 +17,7 @@ export const checkoutSessions = pgTable("checkout_sessions", {
   id: serial("id").primaryKey(),
   stripeSessionId: text("stripe_session_id").notNull().unique(),
   jobId: text("job_id").notNull(),
+  userId: text("user_id"),
   email: text("email"),
   amountCents: integer("amount_cents").notNull(),
   currency: text("currency").notNull().default("usd"),
@@ -39,6 +41,7 @@ export const jobs = pgTable("jobs", {
   isDemo: boolean("is_demo").notNull().default(false),
   stripeSessionId: text("stripe_session_id"),
   paidAmountCents: integer("paid_amount_cents"),
+  userId: text("user_id"),
   email: text("email"),
   freeLeadsApplied: integer("free_leads_applied"),
   createdAt: timestamp("created_at").default(sql`CURRENT_TIMESTAMP`).notNull(),
@@ -84,6 +87,7 @@ export const jobSchema = z.object({
   isDemo: z.boolean().optional(),
   stripeSessionId: z.string().optional(),
   paidAmountCents: z.number().optional(),
+  userId: z.string().optional(),
   email: z.string().optional(),
   freeLeadsApplied: z.number().optional(),
 });

@@ -31,20 +31,22 @@ export class WebhookHandlers {
         const session = event.data.object;
         const pool = getPool();
         await pool.query(
-          `INSERT INTO checkout_sessions (stripe_session_id, job_id, email, amount_cents, currency, payment_status)
-           VALUES ($1, $2, $3, $4, $5, $6)
-           ON CONFLICT (stripe_session_id) DO UPDATE SET payment_status = $6`,
+          `INSERT INTO checkout_sessions (stripe_session_id, job_id, user_id, email, amount_cents, currency, payment_status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           ON CONFLICT (stripe_session_id) DO UPDATE SET payment_status = $7, user_id = COALESCE($3, checkout_sessions.user_id)`,
           [
             session.id,
-            session.metadata?.jobId || 'unknown',
-            session.customer_email || null,
+            session.metadata?.jobId || session.metadata?.tier || 'subscription',
+            session.metadata?.user_id || null,
+            session.customer_email || session.metadata?.email || null,
             session.amount_total || 0,
             session.currency || 'usd',
             session.payment_status || 'unknown',
           ]
         );
         console.log(`Payment recorded for session ${session.id}`, {
-          jobId: session.metadata?.jobId,
+          tier: session.metadata?.tier,
+          userId: session.metadata?.user_id,
           amount: session.amount_total,
         });
         break;

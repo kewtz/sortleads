@@ -28,6 +28,7 @@ import {
   Sparkles,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { useAuth } from "@/context/AuthContext";
 import { trackCtaClicked, trackDemoStarted, trackPageView } from "@/lib/analytics";
 
 const SAMPLE_SCORED_LEADS = [
@@ -106,6 +107,7 @@ const PRICING_TIERS: PricingTier[] = [
 export default function Home() {
   const [, setLocation] = useLocation();
   const { toast } = useToast();
+  const { user, session } = useAuth();
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [showDemoModal, setShowDemoModal] = useState(false);
   const [demoPrompt, setDemoPrompt] = useState("");
@@ -196,12 +198,23 @@ export default function Home() {
   };
 
   const handleTierCheckout = async (tierKey: string) => {
+    // Not signed in → redirect to auth first, then they'll come back
+    if (!user) {
+      trackCtaClicked(`tier_${tierKey}_redirect_auth`, "pricing");
+      setLocation("/auth");
+      return;
+    }
+
     setCheckoutTierLoading(tierKey);
     trackCtaClicked(`tier_${tierKey}`, "pricing");
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (session?.access_token) {
+        headers["Authorization"] = `Bearer ${session.access_token}`;
+      }
       const response = await fetch("/api/checkout", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ tier: tierKey }),
       });
       if (!response.ok) {
@@ -653,7 +666,7 @@ export default function Home() {
         <div className="container mx-auto px-4">
           <div className="mx-auto mb-12 max-w-2xl text-center">
             <h2 className="mb-4 text-3xl font-bold tracking-tight md:text-4xl">
-              Annual site license. Unlimited users. No per-seat fees.
+              Annual site license. All your reps. No per-seat fees.
             </h2>
           </div>
 
@@ -705,7 +718,7 @@ export default function Home() {
                 <p className="mb-3 text-sm font-medium">All plans include:</p>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {[
-                    "Unlimited users",
+                    "Single subscription \u00b7 All your reps \u00b7 No per-seat fees",
                     "CSV/Excel upload",
                     "Hot / Warm / Cold scoring",
                     "Suggested next steps",

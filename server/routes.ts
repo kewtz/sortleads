@@ -10,6 +10,7 @@ import { storage } from "./storage";
 import type { Lead, ProcessedLead, Job } from "@shared/schema";
 import { calculatePrice, MAX_FREE_COUPON_LEADS, FREE_TIER_LEAD_LIMIT } from "@shared/schema";
 import { getStripeClient, getStripePublishableKey } from "./stripeClient";
+import { requireAuth, optionalAuth } from "./auth";
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -586,10 +587,10 @@ export async function registerRoutes(
     res.json({ available: storage.canUseDemo(clientIp) });
   });
   
-  // Check free tier status for an email
-  app.post('/api/free-tier/check', async (req: Request, res: Response) => {
+  // Check free tier status — uses auth user_id if signed in, else email
+  app.post('/api/free-tier/check', optionalAuth, async (req: Request, res: Response) => {
     try {
-      const { email } = req.body;
+      const email = req.user?.email ?? req.body.email;
       if (!email || typeof email !== 'string') {
         return res.status(400).json({ error: 'Email required' });
       }
@@ -597,6 +598,20 @@ export async function registerRoutes(
       const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
       if (!emailRegex.test(email.trim())) {
         return res.status(400).json({ error: 'Invalid email address' });
+      }
+
+      // Subscribed users bypass the free tier entirely
+      if (req.user) {
+        const subscribed = await storage.hasActiveSubscription(req.user.id);
+        if (subscribed) {
+          return res.json({
+            email: email.trim().toLowerCase(),
+            freeLeadsUsed: 0,
+            freeLeadsRemaining: Infinity,
+            freeLeadLimit: FREE_TIER_LEAD_LIMIT,
+            subscribed: true,
+          });
+        }
       }
 
       const user = await storage.getFreeTierUser(email.trim());
@@ -608,6 +623,7 @@ export async function registerRoutes(
         freeLeadsUsed,
         freeLeadsRemaining,
         freeLeadLimit: FREE_TIER_LEAD_LIMIT,
+        subscribed: false,
       });
     } catch (error) {
       console.error('Error checking free tier:', error);
@@ -615,12 +631,12 @@ export async function registerRoutes(
     }
   });
 
-  // Upload file and create job (job stays pending until payment)
-  app.post('/api/jobs', upload.single('file'), async (req: Request, res: Response) => {
+  // Upload file and create job
+  app.post('/api/jobs', optionalAuth, upload.single('file'), async (req: Request, res: Response) => {
     try {
       const file = req.file;
       const prompt = req.body.prompt;
-      const email = req.body.email?.trim();
+      const email = req.user?.email ?? req.body.email?.trim();
       // skipPayment only allowed in development for testing
       const skipPayment = req.body.skipPayment === 'true' && process.env.NODE_ENV !== 'production';
 
@@ -647,12 +663,25 @@ export async function registerRoutes(
         return res.status(400).json({ error: 'No leads found in the file' });
       }
 
-      // Atomically reserve free tier leads (prevents race conditions)
-      const { freeLeadsApplied, billableLeads } = await storage.reserveFreeTierLeads(
-        email, leads.length, FREE_TIER_LEAD_LIMIT
-      );
+      // Subscribers bypass the 50-lead free tier limit entirely
+      const isSubscriber = req.user ? await storage.hasActiveSubscription(req.user.id) : false;
 
-      const job = await storage.createJob(file.originalname, prompt, leads, false, email, freeLeadsApplied);
+      let freeLeadsApplied: number;
+      let billableLeads: number;
+
+      if (isSubscriber) {
+        freeLeadsApplied = leads.length;
+        billableLeads = 0;
+      } else {
+        // Atomically reserve free tier leads (prevents race conditions)
+        const reserved = await storage.reserveFreeTierLeads(
+          email, leads.length, FREE_TIER_LEAD_LIMIT
+        );
+        freeLeadsApplied = reserved.freeLeadsApplied;
+        billableLeads = reserved.billableLeads;
+      }
+
+      const job = await storage.createJob(file.originalname, prompt, leads, false, email, freeLeadsApplied, req.user?.id);
 
       // If skipPayment (for development/testing), start processing immediately
       if (skipPayment) {
@@ -802,7 +831,7 @@ export async function registerRoutes(
   // Stripe Price ID to use. Price IDs are injected via Railway env vars
   // (STRIPE_PRICE_ESSENTIALS / _PROFESSIONAL / _PORTFOLIO) so they aren't
   // hardcoded and can differ across environments.
-  app.post('/api/checkout', async (req: Request, res: Response) => {
+  app.post('/api/checkout', requireAuth, async (req: Request, res: Response) => {
     try {
       const { tier } = req.body as { tier?: string };
 
@@ -830,9 +859,14 @@ export async function registerRoutes(
         mode: 'subscription',
         line_items: [{ price: priceId, quantity: 1 }],
         allow_promotion_codes: true,
+        customer_email: req.user!.email || undefined,
         success_url: `${req.protocol}://${req.get('host')}/upload?subscribed=true`,
         cancel_url: `${req.protocol}://${req.get('host')}/?cancelled=true`,
-        metadata: { tier: tierKey },
+        metadata: {
+          tier: tierKey,
+          user_id: req.user!.id,
+          email: req.user!.email,
+        },
       });
 
       res.json({ url: session.url, sessionId: session.id });
