@@ -185,14 +185,19 @@ export class DbStorage implements IStorage {
     try {
       await client.query("BEGIN");
 
-      // Upsert by user_id. If this user_id has no row yet, they get a fresh
-      // allowance (0 used) even if their email was consumed under old
-      // email-only tracking.
-      const result = await client.query(
+      // Upsert by email. If the row was created before auth existed (user_id
+      // is NULL), reset free_leads_used to 0 so the new auth user gets a
+      // clean slate. If the row already belongs to this user, keep the count.
+      await client.query(
         `INSERT INTO free_tier_users (email, user_id, free_leads_used, last_used_at)
          VALUES ($1, $2, 0, NOW())
-         ON CONFLICT (email) DO UPDATE SET user_id = COALESCE(free_tier_users.user_id, $2), last_used_at = NOW()
-         RETURNING free_leads_used`,
+         ON CONFLICT (email) DO UPDATE SET
+           user_id = COALESCE(free_tier_users.user_id, $2),
+           free_leads_used = CASE
+             WHEN free_tier_users.user_id IS NULL THEN 0
+             ELSE free_tier_users.free_leads_used
+           END,
+           last_used_at = NOW()`,
         [normalizedEmail, userId],
       );
 
